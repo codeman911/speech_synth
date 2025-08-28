@@ -99,6 +99,10 @@ class ExtendedHiggsAudioBatchInput:
         """Check if attribute exists"""
         return hasattr(self, key)
     
+    def get(self, key, default=None):
+        """Get attribute with default value if not found"""
+        return getattr(self, key, default)
+    
     def keys(self):
         """Return all attribute names for compatibility"""
         return [attr for attr in dir(self) if not attr.startswith('_') and not callable(getattr(self, attr))]
