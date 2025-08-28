@@ -411,7 +411,6 @@ class HiggsAudioModelWrapper(nn.Module):
                 loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), labels.view(-1))
             return {"loss": loss, "logits": outputs.logits}
 
-
 class HiggsAudioTrainer(Trainer):
     """Custom trainer for Higgs Audio v2"""
     def __init__(self, **kwargs):
@@ -442,6 +441,7 @@ def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     else:
         model = get_peft_model(model, peft_config)
     return model
+
 
 def main():
     parser = argparse.ArgumentParser(description="Train Higgs Audio v2 with LoRA")

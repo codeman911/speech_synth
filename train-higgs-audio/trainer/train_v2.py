@@ -907,7 +907,6 @@ def main():
         remove_unused_columns=False,
         report_to=args.report_to if args.report_to != "none" else None,
         logging_dir=args.logging_dir,
-        ddp_find_unused_parameters=True,  # For DDD compatibility
     )
     
     # Define a compute_metrics function that ensures eval_loss is computed and returned
