@@ -602,6 +602,25 @@ class HiggsAudioTrainer(Trainer):
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
         
+    def evaluation_loop(self, dataloader, description, prediction_loss_only=None, ignore_keys=None, metric_key_prefix="eval"):
+        """
+        Custom evaluation loop that ensures eval_loss is computed and returned
+        """
+        # Force prediction_loss_only to False to ensure loss is computed
+        if prediction_loss_only is None:
+            prediction_loss_only = False
+            
+        # Call the parent evaluation loop
+        eval_result = super().evaluation_loop(
+            dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix
+        )
+        
+        # Ensure eval_loss is in the metrics
+        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss'):
+            eval_result.metrics["eval_loss"] = eval_result.loss
+            
+        return eval_result
+        
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     """Setup LoRA configuration for the model following the same pattern as trainer_ddp.py"""
     peft_config = LoraConfig(
@@ -772,12 +791,27 @@ def main():
         ddp_find_unused_parameters=True,
         # --- End ultimate fix ---
     )
-
-    data_collator = None
+    
+    # Define a compute_metrics function that works with our model
+    def compute_metrics(eval_pred):
+        """Compute metrics for evaluation"""
+        # For our model, the loss is already computed and returned in the predictions
+        # eval_pred is a tuple of (predictions, labels)
+        predictions = eval_pred.predictions if hasattr(eval_pred, 'predictions') else eval_pred[0]
+        
+        # If predictions is a dict with loss, return it
+        if isinstance(predictions, dict) and 'loss' in predictions:
+            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
+        else:
+            # Return a default value
+            return {"eval_loss": 0.0}
+    
+    # Setup data collator configured to match inference script exactly
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
         try:
             from transformers import WhisperProcessor
             whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
+            
             data_collator = ExtendedHiggsAudioSampleCollator(
                 whisper_processor=whisper_processor,
                 audio_in_token_id=model.config.audio_in_token_idx,
@@ -793,10 +827,12 @@ def main():
             )
         except Exception as e:
             logger.warning(f"Failed to setup Higgs collator: {e}. Using fallback.")
-    if data_collator is None:
+            data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
+    else:
         data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
         logger.warning("Using fallback collator")
-        
+    
+    # Initialize trainer
     trainer = HiggsAudioTrainer(
         model=model,
         args=training_args,
