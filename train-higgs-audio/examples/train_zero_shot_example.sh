@@ -10,6 +10,7 @@ python trainer/train_v2.py \
     --model_path bosonai/higgs-audio-v2-generation-3B-base \
     --audio_tokenizer_path bosonai/higgs-audio-v2-tokenizer \
     --train_data_file ./examples/chatml_zero_shot_train.json \
+    --validation_split 0.05 \
     --output_dir ./output_zero_shot \
     --use_lora \
     --lora_rank 16 \
@@ -29,6 +30,7 @@ torchrun --nproc_per_node=4 trainer/train_v2_ddp.py \
     --model_path bosonai/higgs-audio-v2-generation-3B-base \
     --audio_tokenizer_path bosonai/higgs-audio-v2-tokenizer \
     --train_data_file ./examples/chatml_zero_shot_train.json \
+    --validation_split 0.05 \
     --output_dir ./output_zero_shot_ddp \
     --use_lora \
     --lora_rank 16 \

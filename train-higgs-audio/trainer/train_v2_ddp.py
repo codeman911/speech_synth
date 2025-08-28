@@ -623,7 +623,7 @@ def main():
                        help="Path to ChatML JSON training file")
     parser.add_argument("--eval_data_file", type=str, default="",
                        help="Path to ChatML JSON evaluation file")
-    parser.add_argument("--validation_split", type=float, default=0.0,
+    parser.add_argument("--validation_split", type=float, default=0.05,
                        help="Fraction of training data to use for validation (0.0 to 1.0). If > 0, splits training data for validation.")
 
     # Training arguments
