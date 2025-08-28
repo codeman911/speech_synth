@@ -590,6 +590,7 @@ class HiggsAudioModelWrapper(nn.Module):
                 loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), labels.view(-1))
             return {"loss": loss, "logits": outputs.logits}
 
+
 class HiggsAudioTrainer(Trainer):
     """Custom trainer for Higgs Audio v2 with proper loss computation"""
     
@@ -811,7 +812,6 @@ def main():
         eval_steps=args.eval_steps if eval_dataset else None,
         save_total_limit=3,
         load_best_model_at_end=True if eval_dataset else False,
-        metric_for_best_model="eval_loss" if eval_dataset else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
