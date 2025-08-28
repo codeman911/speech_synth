@@ -636,7 +636,7 @@ def main():
                        help="Path to ChatML JSON training file")
     parser.add_argument("--eval_data_file", type=str, default="",
                        help="Path to ChatML JSON evaluation file")
-    parser.add_argument("--validation_split", type=float, default=0.05,
+    parser.add_argument("--validation_split", type=float, default=0.005,
                        help="Fraction of training data to use for validation (0.0 to 1.0). If > 0, splits training data for validation.")
 
     # Training arguments
@@ -654,9 +654,9 @@ def main():
                        help="Number of warmup steps")
     parser.add_argument("--logging_steps", type=int, default=10,
                        help="Log every X updates steps")
-    parser.add_argument("--save_steps", type=int, default=500,
+    parser.add_argument("--save_steps", type=int, default=7000,
                        help="Save checkpoint every X updates steps")
-    parser.add_argument("--eval_steps", type=int, default=500,
+    parser.add_argument("--eval_steps", type=int, default=5000,
                        help="Evaluate every X updates steps")
     
     # LoRA arguments
