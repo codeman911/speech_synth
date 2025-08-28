@@ -14,7 +14,7 @@ import logging
 import argparse
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from transformers import (
     AutoTokenizer,
     AutoConfig,
@@ -623,6 +623,8 @@ def main():
                        help="Path to ChatML JSON training file")
     parser.add_argument("--eval_data_file", type=str, default="",
                        help="Path to ChatML JSON evaluation file")
+    parser.add_argument("--validation_split", type=float, default=0.0,
+                       help="Fraction of training data to use for validation (0.0 to 1.0). If > 0, splits training data for validation.")
 
     # Training arguments
     parser.add_argument("--output_dir", type=str, default="./output",
@@ -704,8 +706,33 @@ def main():
         model = setup_lora_config(model, lora_config)
         logger.info("LoRA configuration applied")
 
-    train_dataset = ZeroShotVoiceCloningDataset(args.train_data_file, tokenizer, audio_tokenizer)
-    eval_dataset = ZeroShotVoiceCloningDataset(args.eval_data_file, tokenizer, audio_tokenizer) if args.eval_data_file else None
+    # Load training dataset
+    full_train_dataset = ZeroShotVoiceCloningDataset(args.train_data_file, tokenizer, audio_tokenizer)
+    
+    # Handle validation split
+    if args.validation_split > 0.0:
+        # Split training data for validation
+        total_size = len(full_train_dataset)
+        eval_size = int(total_size * args.validation_split)
+        train_size = total_size - eval_size
+        
+        # Split the dataset ensuring validation samples are not in training
+        train_dataset, eval_dataset = torch.utils.data.random_split(
+            full_train_dataset, 
+            [train_size, eval_size],
+            generator=torch.Generator().manual_seed(args.seed)
+        )
+        logger.info(f"Split training data: {train_size} training samples, {eval_size} validation samples")
+    elif args.eval_data_file:
+        # Use separate evaluation file
+        train_dataset = full_train_dataset
+        eval_dataset = ZeroShotVoiceCloningDataset(args.eval_data_file, tokenizer, audio_tokenizer)
+        logger.info(f"Using separate evaluation file: {len(train_dataset)} training samples, {len(eval_dataset)} evaluation samples")
+    else:
+        # No validation - use all training data
+        train_dataset = full_train_dataset
+        eval_dataset = None
+        logger.info(f"Using all data for training: {len(train_dataset)} samples")
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,

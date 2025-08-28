@@ -134,6 +134,7 @@ torchrun --nproc_per_node=4 trainer/train_v2_ddp.py \
 ### Data Arguments
 - `--train_data_file`: Path to ChatML JSON training file
 - `--eval_data_file`: Path to ChatML JSON evaluation file
+- `--validation_split`: Fraction of training data to use for validation (0.0 to 1.0). If > 0, splits training data for validation. When used, the specified fraction of training data will be held out for validation and will not be used for training.
 
 ### Training Arguments
 - `--output_dir`: Directory to save model checkpoints
