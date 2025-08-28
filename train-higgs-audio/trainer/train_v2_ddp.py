@@ -780,6 +780,19 @@ def main():
         eval_dataset = None
         logger.info(f"Using all data for training: {len(train_dataset)} samples")
 
+    # Define a compute_metrics function that ensures eval_loss is computed and returned
+    def compute_metrics(eval_pred):
+        """Compute metrics for evaluation"""
+        # eval_pred is a tuple of (predictions, labels)
+        predictions, labels = eval_pred
+        
+        # If predictions is a dict with loss, return it
+        if isinstance(predictions, dict) and 'loss' in predictions:
+            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
+        else:
+            # Return a default value
+            return {"eval_loss": 0.0}
+    
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -800,10 +813,6 @@ def main():
         remove_unused_columns=False,
         report_to=args.report_to,
         logging_dir=args.logging_dir,
-        # --- Start ultimate fix ---
-        # Set to True to solve DDP hanging issues
-        ddp_find_unused_parameters=True,
-        # --- End ultimate fix ---
     )
 
     # Setup data collator configured to match inference script exactly
@@ -831,19 +840,6 @@ def main():
         data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
         logger.warning("Using fallback collator")
         
-    # Define a compute_metrics function that ensures eval_loss is computed and returned
-    def compute_metrics(eval_pred):
-        """Compute metrics for evaluation"""
-        # eval_pred is a tuple of (predictions, labels)
-        predictions, labels = eval_pred
-        
-        # If predictions is a dict with loss, return it
-        if isinstance(predictions, dict) and 'loss' in predictions:
-            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
-        else:
-            # Return a default value
-            return {"eval_loss": 0.0}
-    
     # Initialize trainer
     trainer = HiggsAudioTrainer(
         model=model,
