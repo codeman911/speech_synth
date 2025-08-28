@@ -35,6 +35,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import librosa
 import re
 from dataclasses import asdict
+import signal
+import sys
 
 # Try to import Higgs Audio related modules
 try:
@@ -640,8 +642,38 @@ def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
         model = get_peft_model(model, peft_config)
     return model
 
+# Global variable to track if we're in the training loop
+_training_in_progress = False
+_trainer = None
+
+def signal_handler(sig, frame):
+    """Handle SIGINT (Ctrl+C) gracefully during training"""
+    global _training_in_progress, _trainer
+    
+    if _training_in_progress and _trainer is not None:
+        logger.info("Received interrupt signal. Attempting to save current checkpoint before exiting...")
+        try:
+            # Try to save the current state
+            if hasattr(_trainer, 'save_model'):
+                _trainer.save_model()
+                logger.info("Model checkpoint saved successfully.")
+        except Exception as e:
+            logger.warning(f"Failed to save checkpoint: {e}")
+        
+        # Set a flag to stop training gracefully
+        _training_in_progress = False
+        logger.info("Training will stop after current step completes.")
+    else:
+        logger.info("Received interrupt signal. Exiting...")
+        sys.exit(0)
 
 def main():
+    global _training_in_progress, _trainer
+    
+    # Set up signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     parser = argparse.ArgumentParser(description="Train Higgs Audio v2 for Zero-Shot Voice Cloning (DDP Version)")
     
     # Model arguments
@@ -791,27 +823,13 @@ def main():
         ddp_find_unused_parameters=True,
         # --- End ultimate fix ---
     )
-    
-    # Define a compute_metrics function that works with our model
-    def compute_metrics(eval_pred):
-        """Compute metrics for evaluation"""
-        # For our model, the loss is already computed and returned in the predictions
-        # eval_pred is a tuple of (predictions, labels)
-        predictions = eval_pred.predictions if hasattr(eval_pred, 'predictions') else eval_pred[0]
-        
-        # If predictions is a dict with loss, return it
-        if isinstance(predictions, dict) and 'loss' in predictions:
-            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
-        else:
-            # Return a default value
-            return {"eval_loss": 0.0}
-    
+
     # Setup data collator configured to match inference script exactly
+    data_collator = None
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
         try:
             from transformers import WhisperProcessor
             whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
-            
             data_collator = ExtendedHiggsAudioSampleCollator(
                 whisper_processor=whisper_processor,
                 audio_in_token_id=model.config.audio_in_token_idx,
@@ -827,11 +845,10 @@ def main():
             )
         except Exception as e:
             logger.warning(f"Failed to setup Higgs collator: {e}. Using fallback.")
-            data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
-    else:
+    if data_collator is None:
         data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
         logger.warning("Using fallback collator")
-    
+        
     # Initialize trainer
     trainer = HiggsAudioTrainer(
         model=model,
@@ -842,17 +859,40 @@ def main():
         data_collator=data_collator,
     )
 
+    # Store trainer reference for signal handler
+    _trainer = trainer
+    
     logger.info(f"Starting zero-shot voice cloning training on device: {device}")
-    trainer.train()
+    
+    # Set training in progress flag
+    _training_in_progress = True
+    
+    try:
+        trainer.train()
+    except KeyboardInterrupt:
+        logger.info("Training interrupted by user.")
+    except Exception as e:
+        logger.error(f"Training failed with error: {e}")
+        raise
+    finally:
+        _training_in_progress = False
 
-    if trainer.is_world_process_zero():
-        trainer.save_model()
-        logger.info(f"Model saved to {args.output_dir}")
-        if args.use_lora:
-            lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-            model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            model_to_save.save_pretrained(lora_output_dir)
-            logger.info(f"LoRA adapters saved to {lora_output_dir}")
+    # Save model - only the main process should save
+    try:
+        if trainer.is_world_process_zero():
+            trainer.save_model()
+            logger.info(f"Model saved to {args.output_dir}")
+            if args.use_lora:
+                lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
+                model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
+                model_to_save.save_pretrained(lora_output_dir)
+                logger.info(f"LoRA adapters saved to {lora_output_dir}")
+    except Exception as e:
+        logger.error(f"Failed to save model: {e}")
+    
+    # Ensure all processes are synchronized before exiting
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
 
 if __name__ == "__main__":
     main()
