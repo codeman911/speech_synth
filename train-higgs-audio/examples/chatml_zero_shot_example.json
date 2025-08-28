@@ -1,0 +1,106 @@
+[
+  {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant capable of generating speech in the voice of the provided reference audio."
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "حلو لو سميته حاجة ممكن الأهالي يسمعوه"
+          },
+          {
+            "type": "audio",
+            "audio_url": "./datasets/part_1/ref_audio_20250804_102703_00000000_default_66b18748.wav",
+            "raw_audio": "",
+            "duration": null,
+            "offset": null
+          },
+          {
+            "type": "text",
+            "text": "Please generate speech for given text in reference audio's voice: وَمِنْ ثُمَّ قَالُوا أَنَّهُ لا يُوجَدُ إِلا أَنْ نَأْخُذَ سَيَنْسَتِيلْ."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "وَمِنْ ثُمَّ قَالُوا أَنَّهُ لا يُوجَدُ إِلا أَنْ نَأْخُذَ سَيَنْسَتِيلْ."
+          },
+          {
+            "type": "audio",
+            "audio_url": "./datasets/part_1/target_audio_20250804_102703_00000000_default_66b18748.wav",
+            "raw_audio": "",
+            "duration": 2.1333333333333333,
+            "offset": null
+          }
+        ]
+      }
+    ],
+    "start_index": 0,
+    "speaker": "sample_00000000",
+    "misc": {
+      "sample_id": "sample_00000000",
+      "ref_transcript": "حلو لو سميته حاجة ممكن الأهالي يسمعوه",
+      "target_transcript": "وَمِنْ ثُمَّ قَالُوا أَنَّهُ لا يُوجَدُ إِلا أَنْ نَأْخُذَ سَيَنْسَتِيلْ.",
+      "duration": 2.1333333333333333
+    }
+  },
+  {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant capable of generating speech in the voice of the provided reference audio."
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Today is a beautiful day and I'm feeling great!"
+          },
+          {
+            "type": "audio",
+            "audio_url": "./datasets/part_1/ref_audio_20250804_102703_00000001_default_a1b2c3d4.wav",
+            "raw_audio": "",
+            "duration": null,
+            "offset": null
+          },
+          {
+            "type": "text",
+            "text": "Please generate speech for given text in reference audio's voice: Hello, how are you doing today? I hope you're having a wonderful day!"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Hello, how are you doing today? I hope you're having a wonderful day!"
+          },
+          {
+            "type": "audio",
+            "audio_url": "./datasets/part_1/target_audio_20250804_102703_00000001_default_a1b2c3d4.wav",
+            "raw_audio": "",
+            "duration": 3.45,
+            "offset": null
+          }
+        ]
+      }
+    ],
+    "start_index": 0,
+    "speaker": "sample_00000001",
+    "misc": {
+      "sample_id": "sample_00000001",
+      "ref_transcript": "Today is a beautiful day and I'm feeling great!",
+      "target_transcript": "Hello, how are you doing today? I hope you're having a wonderful day!",
+      "duration": 3.45
+    }
+  }
+]
