@@ -779,9 +779,9 @@ def main():
                        help="Number of warmup steps")
     parser.add_argument("--logging_steps", type=int, default=10,
                        help="Log every X updates steps")
-    parser.add_argument("--save_steps", type=int, default=50,
+    parser.add_argument("--save_steps", type=int, default=500,
                        help="Save checkpoint every X updates steps")
-    parser.add_argument("--eval_steps", type=int, default=50,
+    parser.add_argument("--eval_steps", type=int, default=500,
                        help="Evaluate every X updates steps")
     
     # LoRA arguments
