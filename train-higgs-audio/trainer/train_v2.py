@@ -907,20 +907,8 @@ def main():
         remove_unused_columns=False,
         report_to=args.report_to if args.report_to != "none" else None,
         logging_dir=args.logging_dir,
+        ddp_find_unused_parameters=True,  # For DDD compatibility
     )
-    
-    # Define a compute_metrics function that ensures eval_loss is computed and returned
-    def compute_metrics(eval_pred):
-        """Compute metrics for evaluation"""
-        # eval_pred is a tuple of (predictions, labels)
-        predictions, labels = eval_pred
-        
-        # If predictions is a dict with loss, return it
-        if isinstance(predictions, dict) and 'loss' in predictions:
-            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
-        else:
-            # Return a default value
-            return {"eval_loss": 0.0}
     
     # Setup data collator configured to match inference script exactly
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
@@ -956,7 +944,6 @@ def main():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=compute_metrics,  # Add compute_metrics function
     )
     
     # Start training
