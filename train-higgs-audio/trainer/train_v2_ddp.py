@@ -294,7 +294,25 @@ class ZeroShotVoiceCloningDataset(Dataset):
             if ref_audio_path and not os.path.isabs(ref_audio_path):
                 # Resolve relative to the data file directory
                 data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
-                ref_audio_path = os.path.normpath(os.path.join(data_file_dir, ref_audio_path))
+                resolved_path = os.path.normpath(os.path.join(data_file_dir, ref_audio_path))
+                
+                # Check if the resolved path exists, if not, try alternative resolutions
+                if not os.path.exists(resolved_path):
+                    # Try resolving relative to the parent directory
+                    parent_dir = os.path.dirname(data_file_dir)
+                    alt_resolved_path = os.path.normpath(os.path.join(parent_dir, ref_audio_path))
+                    if os.path.exists(alt_resolved_path):
+                        resolved_path = alt_resolved_path
+                        logger.info(f"Using alternative path resolution: {resolved_path}")
+                    else:
+                        # Try resolving relative to the grandparent directory
+                        grandparent_dir = os.path.dirname(parent_dir)
+                        alt_resolved_path = os.path.normpath(os.path.join(grandparent_dir, ref_audio_path))
+                        if os.path.exists(alt_resolved_path):
+                            resolved_path = alt_resolved_path
+                            logger.info(f"Using alternative path resolution: {resolved_path}")
+                
+                ref_audio_path = resolved_path
             
             if not all([ref_audio_path, ref_text, target_text]):
                 logger.warning(f"Missing required components: ref_audio={ref_audio_path}, ref_text={ref_text}, target_text={target_text}")
@@ -313,17 +331,11 @@ class ZeroShotVoiceCloningDataset(Dataset):
         
         Args:
             ref_text: Reference text
-            ref_audio_path: Reference audio path
+            ref_audio_path: Reference audio path (already resolved)
             
         Returns:
             Tuple of (messages, audio_ids)
         """
-        # Resolve relative paths for reference audio if needed
-        if ref_audio_path and not os.path.isabs(ref_audio_path):
-            # Resolve relative to the data file directory
-            data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
-            ref_audio_path = os.path.normpath(os.path.join(data_file_dir, ref_audio_path))
-        
         # Create system message
         system_message = Message(
             role="system",

@@ -381,17 +381,11 @@ class ZeroShotVoiceCloningDataset(Dataset):
         
         Args:
             ref_text: Reference text
-            ref_audio_path: Reference audio path
+            ref_audio_path: Reference audio path (already resolved)
             
         Returns:
             Tuple of (messages, audio_ids)
         """
-        # Resolve relative paths for reference audio if needed
-        if ref_audio_path and not os.path.isabs(ref_audio_path):
-            # Resolve relative to the data file directory
-            data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
-            ref_audio_path = os.path.normpath(os.path.join(data_file_dir, ref_audio_path))
-        
         # Create system message
         system_message = Message(
             role="system",
