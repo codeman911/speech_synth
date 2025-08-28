@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Single-GPU training script using train_v2.py
+# Single-GPU training script using train_v2.py for zero-shot voice cloning
 # Uses training_data/chatml/train_chatml_samples.json as training data
 
 torchrun --nproc_per_node=1 trainer/train_v2.py \
@@ -17,6 +17,7 @@ torchrun --nproc_per_node=1 trainer/train_v2.py \
     --warmup_steps 100 \
     --bf16 \
     --report_to tensorboard \
-    --logging_dir ./logs
+    --logging_dir ./logs \
+    --task_type zero_shot_voice_cloning
 
 echo "Training completed. Check the output directory for results."
