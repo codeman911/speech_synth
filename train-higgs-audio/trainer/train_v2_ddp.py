@@ -290,6 +290,12 @@ class ZeroShotVoiceCloningDataset(Dataset):
                             if target_text is None and len(text_parts) > 1:
                                 target_text = text_parts[-1]  # Last text as fallback
             
+            # Resolve relative paths based on the data file location
+            if ref_audio_path and not os.path.isabs(ref_audio_path):
+                # Resolve relative to the data file directory
+                data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
+                ref_audio_path = os.path.normpath(os.path.join(data_file_dir, ref_audio_path))
+            
             if not all([ref_audio_path, ref_text, target_text]):
                 logger.warning(f"Missing required components: ref_audio={ref_audio_path}, ref_text={ref_text}, target_text={target_text}")
                 return None, None, None, None
@@ -312,6 +318,12 @@ class ZeroShotVoiceCloningDataset(Dataset):
         Returns:
             Tuple of (messages, audio_ids)
         """
+        # Resolve relative paths for reference audio if needed
+        if ref_audio_path and not os.path.isabs(ref_audio_path):
+            # Resolve relative to the data file directory
+            data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
+            ref_audio_path = os.path.normpath(os.path.join(data_file_dir, ref_audio_path))
+        
         # Create system message
         system_message = Message(
             role="system",
@@ -393,6 +405,12 @@ class ZeroShotVoiceCloningDataset(Dataset):
                             target_audio_path = item["audio_url"]
                             break
             
+            # Resolve relative paths for target audio
+            if target_audio_path and not os.path.isabs(target_audio_path):
+                # Resolve relative to the data file directory
+                data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
+                target_audio_path = os.path.normpath(os.path.join(data_file_dir, target_audio_path))
+            
             if target_audio_path:
                 messages.append(Message(role="assistant", content=AudioContent(audio_url=target_audio_path)))
             else:
@@ -437,9 +455,16 @@ class ZeroShotVoiceCloningDataset(Dataset):
             # For ChatMLDatasetSample preparation, also process reference audio for Whisper conditioning
             ref_waveform = None
             ref_sample_rate = None
-            if ref_audio_path and os.path.exists(ref_audio_path):
+            # Resolve reference audio path for Whisper conditioning
+            if ref_audio_path and not os.path.isabs(ref_audio_path):
+                data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
+                resolved_ref_audio_path = os.path.normpath(os.path.join(data_file_dir, ref_audio_path))
+            else:
+                resolved_ref_audio_path = ref_audio_path
+                
+            if resolved_ref_audio_path and os.path.exists(resolved_ref_audio_path):
                 try:
-                    ref_waveform, ref_sample_rate = self._load_audio_waveform(ref_audio_path)
+                    ref_waveform, ref_sample_rate = self._load_audio_waveform(resolved_ref_audio_path)
                 except Exception as e:
                     logger.warning(f"Could not load reference waveform: {e}")
             
@@ -465,8 +490,7 @@ class ZeroShotVoiceCloningDataset(Dataset):
 
 
 class HiggsAudioModelWrapper(nn.Module):
-    """Wrapper for Higgs Audio v2 model to enable training with proper type alignment"""
-    
+    """Wrapper for Higgs Audio v2 model to enable training"""
     def __init__(self, model_path: str, device: str = 'cuda:0', args=None):
         super().__init__()
         if HIGGS_AVAILABLE:
