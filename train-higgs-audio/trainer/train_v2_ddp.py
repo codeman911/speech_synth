@@ -677,6 +677,8 @@ def main():
                        help="Save checkpoint every X updates steps")
     parser.add_argument("--eval_steps", type=int, default=5000,
                        help="Evaluate every X updates steps")
+    parser.add_argument("--disable_evaluation", action="store_true", default=False,
+                       help="Disable evaluation during training to avoid checkpoint/evaluation mismatch")
     
     # LoRA arguments
     parser.add_argument("--use_lora", action="store_true", default=False,
@@ -766,6 +768,9 @@ def main():
         eval_dataset = None
         logger.info(f"Using all data for training: {len(train_dataset)} samples")
 
+    # Determine if evaluation should be enabled
+    evaluation_enabled = eval_dataset is not None and not args.disable_evaluation
+
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -775,11 +780,11 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        evaluation_strategy="steps" if eval_dataset else "no",
-        eval_steps=args.eval_steps if eval_dataset else None,
+        evaluation_strategy="steps" if evaluation_enabled else "no",
+        eval_steps=args.eval_steps if evaluation_enabled else None,
         save_total_limit=3,
-        load_best_model_at_end=True if eval_dataset else False,
-        metric_for_best_model="eval_loss" if eval_dataset else None,
+        load_best_model_at_end=evaluation_enabled,  # Only True when evaluation is enabled
+        metric_for_best_model="eval_loss" if evaluation_enabled else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
