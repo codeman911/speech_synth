@@ -103,6 +103,15 @@ class ExtendedHiggsAudioBatchInput:
         """Get attribute with default value if not found"""
         return getattr(self, key, default)
     
+    def to(self, device):
+        """Move all tensor attributes to the specified device"""
+        for attr_name in dir(self):
+            if not attr_name.startswith('_') and not callable(getattr(self, attr_name)):
+                attr_value = getattr(self, attr_name)
+                if isinstance(attr_value, torch.Tensor):
+                    setattr(self, attr_name, attr_value.to(device))
+        return self
+    
     def keys(self):
         """Return all attribute names for compatibility"""
         return [attr for attr in dir(self) if not attr.startswith('_') and not callable(getattr(self, attr))]
