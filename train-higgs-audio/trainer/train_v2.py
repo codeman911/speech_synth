@@ -467,11 +467,29 @@ class ZeroShotVoiceCloningDataset(Dataset):
                             target_audio_path = item["audio_url"]
                             break
             
-            # Resolve relative paths for target audio
+            # Resolve relative paths for target audio with alternative resolution
             if target_audio_path and not os.path.isabs(target_audio_path):
                 # Resolve relative to the data file directory
                 data_file_dir = os.path.dirname(os.path.abspath(self.data_file))
-                target_audio_path = os.path.normpath(os.path.join(data_file_dir, target_audio_path))
+                resolved_path = os.path.normpath(os.path.join(data_file_dir, target_audio_path))
+                
+                # Check if the resolved path exists, if not, try alternative resolutions
+                if not os.path.exists(resolved_path):
+                    # Try resolving relative to the parent directory
+                    parent_dir = os.path.dirname(data_file_dir)
+                    alt_resolved_path = os.path.normpath(os.path.join(parent_dir, target_audio_path))
+                    if os.path.exists(alt_resolved_path):
+                        resolved_path = alt_resolved_path
+                        logger.info(f"Using alternative path resolution: {resolved_path}")
+                    else:
+                        # Try resolving relative to the grandparent directory
+                        grandparent_dir = os.path.dirname(parent_dir)
+                        alt_resolved_path = os.path.normpath(os.path.join(grandparent_dir, target_audio_path))
+                        if os.path.exists(alt_resolved_path):
+                            resolved_path = alt_resolved_path
+                            logger.info(f"Using alternative path resolution: {resolved_path}")
+                
+                target_audio_path = resolved_path
             
             if target_audio_path:
                 messages.append(Message(role="assistant", content=AudioContent(audio_url=target_audio_path)))
