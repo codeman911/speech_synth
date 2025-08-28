@@ -56,7 +56,7 @@ except ImportError:
                 setattr(self, key, value)
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Add constants
@@ -303,14 +303,14 @@ class ZeroShotVoiceCloningDataset(Dataset):
                     alt_resolved_path = os.path.normpath(os.path.join(parent_dir, ref_audio_path))
                     if os.path.exists(alt_resolved_path):
                         resolved_path = alt_resolved_path
-                        logger.info(f"Using alternative path resolution: {resolved_path}")
+                        logger.debug(f"Using alternative path resolution: {resolved_path}")
                     else:
                         # Try resolving relative to the grandparent directory
                         grandparent_dir = os.path.dirname(parent_dir)
                         alt_resolved_path = os.path.normpath(os.path.join(grandparent_dir, ref_audio_path))
                         if os.path.exists(alt_resolved_path):
                             resolved_path = alt_resolved_path
-                            logger.info(f"Using alternative path resolution: {resolved_path}")
+                            logger.debug(f"Using alternative path resolution: {resolved_path}")
                 
                 ref_audio_path = resolved_path
             
@@ -343,7 +343,7 @@ class ZeroShotVoiceCloningDataset(Dataset):
         )
         
         # Load and encode reference audio
-        logger.info(f"Loading reference audio waveform: {ref_audio_path}")
+        logger.debug(f"Loading reference audio waveform: {ref_audio_path}")
         if not os.path.exists(ref_audio_path):
             logger.error(f"Reference audio file not found: {ref_audio_path}")
             return [], []
@@ -351,18 +351,18 @@ class ZeroShotVoiceCloningDataset(Dataset):
         try:
             # Load audio waveform
             waveform, sr = torchaudio.load(ref_audio_path)
-            logger.info(f"Loaded audio: shape={waveform.shape}, sr={sr}")
+            logger.debug(f"Loaded audio: shape={waveform.shape}, sr={sr}")
             
             # Convert to mono if stereo
             if waveform.shape[0] > 1:
                 waveform = waveform.mean(dim=0, keepdim=True)
-                logger.info(f"Converted to mono: shape={waveform.shape}")
+                logger.debug(f"Converted to mono: shape={waveform.shape}")
             
             # Encode reference audio for DAC tokens
             audio_tokens = self._encode_audio_tokens(ref_audio_path)
             audio_ids = [audio_tokens] if audio_tokens is not None else []
             if audio_tokens is not None:
-                logger.info(f"Audio tokens shape: {audio_tokens.shape}")
+                logger.debug(f"Audio tokens shape: {audio_tokens.shape}")
             
         except Exception as e:
             logger.error(f"Error loading audio: {e}")
@@ -430,14 +430,14 @@ class ZeroShotVoiceCloningDataset(Dataset):
                     alt_resolved_path = os.path.normpath(os.path.join(parent_dir, target_audio_path))
                     if os.path.exists(alt_resolved_path):
                         resolved_path = alt_resolved_path
-                        logger.info(f"Using alternative path resolution: {resolved_path}")
+                        logger.debug(f"Using alternative path resolution: {resolved_path}")
                     else:
                         # Try resolving relative to the grandparent directory
                         grandparent_dir = os.path.dirname(parent_dir)
                         alt_resolved_path = os.path.normpath(os.path.join(grandparent_dir, target_audio_path))
                         if os.path.exists(alt_resolved_path):
                             resolved_path = alt_resolved_path
-                            logger.info(f"Using alternative path resolution: {resolved_path}")
+                            logger.debug(f"Using alternative path resolution: {resolved_path}")
                 
                 target_audio_path = resolved_path
             
