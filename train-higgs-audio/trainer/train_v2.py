@@ -882,7 +882,7 @@ def main():
         save_total_limit=3,
         load_best_model_at_end=True if eval_dataset else False,
         metric_for_best_model="eval_loss" if eval_dataset else None,
-        fp10=False,
+        fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
         remove_unused_columns=False,
