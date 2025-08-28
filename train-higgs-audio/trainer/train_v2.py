@@ -696,6 +696,25 @@ class HiggsAudioTrainer(Trainer):
         
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
+        
+    def evaluation_loop(self, dataloader, description, prediction_loss_only=None, ignore_keys=None, metric_key_prefix="eval"):
+        """
+        Custom evaluation loop that ensures eval_loss is computed and returned
+        """
+        # Force prediction_loss_only to False to ensure loss is computed
+        if prediction_loss_only is None:
+            prediction_loss_only = False
+            
+        # Call the parent evaluation loop
+        eval_result = super().evaluation_loop(
+            dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix
+        )
+        
+        # Ensure eval_loss is in the metrics
+        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss'):
+            eval_result.metrics["eval_loss"] = eval_result.loss
+            
+        return eval_result
 
 
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
