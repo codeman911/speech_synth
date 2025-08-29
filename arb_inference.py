@@ -104,11 +104,7 @@ class ArabicVoiceCloningInference:
         
         # Load model
         logger.info(f"Loading Higgs Audio model from {model_path}")
-        self.model = HiggsAudioModel.from_pretrained(
-            model_path,
-            device_map=self._device,
-            torch_dtype=torch.bfloat16,
-        )
+        self.model = self._load_model_safely(model_path)
         self.model.eval()
         
         # Load tokenizer and config
@@ -899,7 +895,8 @@ class ArabicVoiceCloningInference:
         temperature: float = 0.3,
         top_k: int = 50,
         top_p: float = 0.95,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        num_of_samples: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Process a ChatML file and generate Arabic speech for all samples.
@@ -911,6 +908,7 @@ class ArabicVoiceCloningInference:
             top_k: Top-k sampling parameter  
             top_p: Top-p sampling parameter
             seed: Random seed
+            num_of_samples: Number of samples to process (default: all samples)
             
         Returns:
             List of processing results
@@ -925,6 +923,11 @@ class ArabicVoiceCloningInference:
         
         if not isinstance(samples, list):
             samples = [samples]
+        
+        # Apply the sample limit if specified
+        if num_of_samples is not None and num_of_samples > 0:
+            samples = samples[:num_of_samples]
+            logger.info(f"Processing only first {num_of_samples} samples")
         
         results = []
         
@@ -1128,6 +1131,37 @@ class ArabicVoiceCloningInference:
         
         logger.info("\n" + "="*80)
         return validation_results
+    
+    def _load_model_safely(self, model_path: str):
+        """
+        Safely load model from either local path or Hugging Face Hub.
+        
+        Args:
+            model_path: Path to model directory or Hugging Face model ID
+            
+        Returns:
+            Loaded model instance
+        """
+        try:
+            # Check if model_path is a local directory
+            if os.path.exists(model_path) and os.path.isdir(model_path):
+                logger.info(f"Loading model from local path: {model_path}")
+                return HiggsAudioModel.from_pretrained(
+                    model_path,
+                    device_map=self._device,
+                    torch_dtype=torch.bfloat16,
+                )
+            else:
+                # Treat as Hugging Face model ID
+                logger.info(f"Loading model from Hugging Face Hub: {model_path}")
+                return HiggsAudioModel.from_pretrained(
+                    model_path,
+                    device_map=self._device,
+                    torch_dtype=torch.bfloat16,
+                )
+        except Exception as e:
+            logger.error(f"Failed to load model from {model_path}: {e}")
+            raise
 
 
 @click.command()
@@ -1203,6 +1237,12 @@ class ArabicVoiceCloningInference:
     default=True,
     help="Enable adaptive token calculation based on text length"
 )
+@click.option(
+    "--num_of_samples",
+    type=int,
+    default=None,
+    help="Number of samples to process (default: all samples)"
+)
 def main(
     chatml_file,
     output_dir,
@@ -1215,7 +1255,8 @@ def main(
     top_p,
     seed,
     max_new_tokens,
-    adaptive_max_tokens
+    adaptive_max_tokens,
+    num_of_samples: Optional[int]  # Add this parameter
 ):
     """
     Arabic Zero-Shot Voice Cloning Inference Script
@@ -1255,7 +1296,8 @@ def main(
         temperature=temperature,
         top_k=top_k,
         top_p=top_p,
-        seed=seed
+        seed=seed,
+        num_of_samples=num_of_samples  # Add this line
     )
     
     # Print comprehensive summary with debugging insights
