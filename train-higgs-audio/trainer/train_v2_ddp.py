@@ -885,7 +885,13 @@ def main():
             # For LoRA training, save only the adapters
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            model_to_save.save_pretrained(lora_output_dir)
+            # Check model structure before calling save_pretrained (following the pattern from trainer.py)
+            if hasattr(model_to_save, 'model') and hasattr(model_to_save.model, 'text_model'):
+                model_to_save.model.text_model.save_pretrained(lora_output_dir)
+            elif hasattr(model_to_save, 'model'):
+                model_to_save.model.save_pretrained(lora_output_dir)
+            else:
+                model_to_save.save_pretrained(lora_output_dir)
             logger.info(f"LoRA adapters saved to {lora_output_dir}")
         else:
             # For full fine-tuning, save the full model
