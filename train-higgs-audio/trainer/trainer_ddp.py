@@ -198,170 +198,359 @@ class HiggsAudioDataset(Dataset):
             self.samples = self._load_samples_from_metadata()
         else:
             logger.warning(f"metadata.json not found in {data_dir}. Scanning directory instead.")
-            self.samples = self._load_samples_from_directory()
-            
-        if not self.samples:
-            raise RuntimeError(f"No valid samples found in {data_dir} for task '{self.task_type}'.")
-        logger.info(f"Loaded {len(self.samples)} samples from {data_dir} for task: {self.task_type}")
+            self.samples = self._scan_data_directory()
 
-    def _detect_codebook_size(self) -> int:
+    def _detect_codebook_size(self):
+        """Detect the actual number of codebooks in the audio tokenizer"""
+        if self.audio_tokenizer is None:
+            return 8  # Default fallback
         try:
-            audio_files = list(self.data_dir.glob("*.wav")) + list(self.data_dir.glob("*.mp3"))
-            if audio_files:
-                test_tokens = self._encode_audio_tokens(str(audio_files[0]))
-                if test_tokens is not None and test_tokens.dim() == 2:
-                    logger.info(f"Detected {test_tokens.shape[0]} codebooks from audio tokenizer.")
-                    return test_tokens.shape[0]
+            # Try to get the codebook size from the tokenizer configuration
+            if hasattr(self.audio_tokenizer, 'config') and hasattr(self.audio_tokenizer.config, 'codebook_size'):
+                return self.audio_tokenizer.config.codebook_size
+            # Fallback to default
+            return 8
         except Exception as e:
-            logger.warning(f"Could not auto-detect codebook size: {e}. Falling back to default.")
-        default_size = getattr(self.audio_tokenizer, 'codebook_size', 8)
-        logger.info(f"Using default codebook size: {default_size}")
-        return default_size
+            logger.warning(f"Could not detect codebook size: {e}. Using default of 8.")
+            return 8
 
-    def _load_samples_from_metadata(self) -> List[Dict]:
+    def _load_samples_from_metadata(self):
+        """Load dataset samples from metadata.json"""
         metadata_path = self.data_dir / "metadata.json"
+        logger.info(f"Loading samples from {metadata_path}")
+        
         with open(metadata_path, 'r', encoding='utf-8') as f:
-            metadata = json.load(f).get("samples", [])
-        for sample in metadata:
-            sample["audio_file"] = str(self.data_dir / sample["audio_file"])
-            if "transcript_file" in sample:
-                sample["transcript_file"] = str(self.data_dir / sample["transcript_file"])
-        return metadata
-
-    def _load_samples_from_directory(self) -> List[Dict]:
+            metadata = json.load(f)
+            
         samples = []
-        audio_files = list(self.data_dir.glob("*.wav")) + list(self.data_dir.glob("*.mp3"))
-        for audio_path in audio_files:
-            transcript_path = audio_path.with_suffix('.txt')
-            if transcript_path.exists():
-                samples.append({"audio_file": str(audio_path), "transcript_file": str(transcript_path), "audio_id": audio_path.stem})
+        for item in metadata:
+            try:
+                # Resolve paths relative to data directory
+                audio_path = item.get("audio_path")
+                if audio_path and not os.path.isabs(audio_path):
+                    audio_path = os.path.normpath(self.data_dir / audio_path)
+                    
+                sample = {
+                    "audio_path": audio_path,
+                    "text": item.get("text", ""),
+                    "speaker": item.get("speaker", "default"),
+                    "task_type": item.get("task_type", self.task_type),
+                }
+                
+                # Validate sample
+                if self._validate_sample(sample):
+                    samples.append(sample)
+            except Exception as e:
+                logger.warning(f"Skipping invalid sample: {e}")
+                
+        logger.info(f"Loaded {len(samples)} valid samples from metadata")
         return samples
 
+    def _scan_data_directory(self):
+        """Scan data directory for audio files and corresponding text files"""
+        logger.info(f"Scanning directory {self.data_dir} for audio files")
+        
+        audio_extensions = {'.wav', '.mp3', '.flac', '.aac', '.m4a'}
+        samples = []
+        
+        for file_path in self.data_dir.rglob('*'):
+            if file_path.suffix.lower() in audio_extensions:
+                try:
+                    # Look for corresponding text file
+                    text_file = file_path.with_suffix('.txt')
+                    if not text_file.exists():
+                        # Try alternative naming patterns
+                        text_file = file_path.parent / f"{file_path.stem}.txt"
+                        
+                    if text_file.exists():
+                        with open(text_file, 'r', encoding='utf-8') as f:
+                            text = f.read().strip()
+                            
+                        sample = {
+                            "audio_path": str(file_path),
+                            "text": text,
+                            "speaker": "default",
+                            "task_type": self.task_type,
+                        }
+                        
+                        if self._validate_sample(sample):
+                            samples.append(sample)
+                except Exception as e:
+                    logger.warning(f"Error processing {file_path}: {e}")
+                    
+        logger.info(f"Found {len(samples)} valid samples by scanning directory")
+        return samples
+
+    def _validate_sample(self, sample):
+        """Validate a dataset sample"""
+        audio_path = sample.get("audio_path")
+        text = sample.get("text", "")
+        
+        # Check if audio file exists
+        if audio_path and not os.path.exists(audio_path):
+            logger.warning(f"Audio file not found: {audio_path}")
+            return False
+            
+        # Check if text is not empty
+        if not text.strip():
+            logger.warning(f"Empty text for sample: {audio_path}")
+            return False
+            
+        return True
+
     def _load_audio_waveform(self, audio_path: str) -> Tuple[torch.Tensor, int]:
+        """Load and process audio waveform"""
         try:
             waveform, sr = torchaudio.load(audio_path)
-            if waveform.shape[0] > 1: waveform = waveform.mean(dim=0, keepdim=True)
-            if sr != self.sample_rate: waveform = torchaudio.functional.resample(waveform, orig_freq=sr, new_freq=self.sample_rate)
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            if sr != self.sample_rate:
+                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
+                waveform = resampler(waveform)
             return waveform.squeeze(0), self.sample_rate
         except Exception as e:
             logger.error(f"Failed to load audio {audio_path}: {e}")
             return torch.zeros(1), self.sample_rate
 
     def _encode_audio_tokens(self, audio_path: str) -> Optional[torch.Tensor]:
-        if not self.audio_tokenizer: return None
+        """Encode audio to tokens using audio tokenizer"""
+        if not self.audio_tokenizer: 
+            return None
         try:
             return self.audio_tokenizer.encode(audio_path)
         except Exception as e:
             logger.error(f"Failed to encode audio {audio_path}: {e}")
             return None
 
-    def _normalize_transcript(self, transcript: str) -> str:
-        transcript = normalize_chinese_punctuation(transcript)
-        transcript = transcript.replace("(", " ").replace(")", " ")
-        transcript = transcript.replace("°F", " degrees Fahrenheit").replace("°C", " degrees Celsius")
-        for tag, replacement in [("[laugh]", "<SE>[Laughter]</SE>"), ("[cough]", "<SE>[Cough]</SE>")]:
-            transcript = transcript.replace(tag, replacement)
-        lines = transcript.split("\n")
-        transcript = "\n".join([" ".join(line.split()) for line in lines if line.strip()])
-        if transcript and not any(transcript.endswith(c) for c in ".!?,\";'</SE_e></SE>"):
-            transcript += "."
-        return transcript.strip()
+    def _prepare_multispeaker_smart_voice_sample(self, sample: Dict) -> ChatMLDatasetSample:
+        """Prepare sample for multi-speaker smart voice task"""
+        text = sample["text"]
+        audio_path = sample["audio_path"]
+        speaker = sample["speaker"]
+        
+        # Create system message with speaker information
+        system_message = f"[SPEAKER_{speaker}] {MULTISPEAKER_DEFAULT_SYSTEM_MESSAGE}"
+        system_content = _build_system_message_with_audio_prompt(system_message)
+        
+        # Load and encode audio
+        waveform, sr = self._load_audio_waveform(audio_path)
+        audio_tokens = self._encode_audio_tokens(audio_path)
+        
+        # Create messages
+        messages = [
+            Message(role="system", content=system_content),
+            Message(role="user", content=text),
+            Message(role="assistant", content=AudioContent(audio_url=audio_path))
+        ]
+        
+        chatml_sample = ChatMLSample(messages=messages)
+        
+        # Process with prepare function
+        input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(
+            chatml_sample, self.tokenizer
+        )
+        
+        # Process audio data
+        context_audio_tokens = []
+        for audio_content in (audio_contents or []):
+            if audio_content.audio_url:
+                tokens = self._encode_audio_tokens(audio_content.audio_url)
+                if tokens is not None:
+                    context_audio_tokens.append(tokens)
 
-    def _get_scene_description(self, sample: Dict) -> str:
-        return f"Audio is recorded from {sample.get('scene', 'a quiet room').replace('_', ' ')}."
+        label_audio_tokens = []
+        for audio_label_content in (audio_label_contents or []):
+            if audio_label_content and audio_label_content.audio_url:
+                tokens = self._encode_audio_tokens(audio_label_content.audio_url)
+                if tokens is not None:
+                    label_audio_tokens.append(tokens)
 
-    def _detect_speaker_tags(self, transcript: str) -> List[str]:
-        return sorted(set(re.findall(r"\[(SPEAKER\d+)\]", transcript)))
-
-    def _create_messages_for_task(self, sample: Dict, transcript: str) -> List[Message]:
-        messages = []
-        speaker_tags = self._detect_speaker_tags(transcript)
-        scene_prompt = self._get_scene_description(sample) if self.use_metadata else None
-
-        if self.task_type == "zero_shot_voice_cloning":
-            ref_audio = sample.get("ref_audio_file")
-            if not ref_audio:
-                return [Message(role="system", content="Generate audio following instruction.")]
-            ref_audio_path = str(self.data_dir / ref_audio)
-            ref_transcript = sample.get("ref_transcript", "This is a voice sample for cloning.")
-            if self.ref_audio_in_system_message:
-                system_content = f"Generate audio following instruction.\n\n<|scene_desc_start|>\n{scene_prompt}\n\nSPEAKER0: {AUDIO_PLACEHOLDER_TOKEN}\n<|scene_desc_end|>"
-                messages.append(_build_system_message_with_audio_prompt(system_content))
-            else:
-                messages.append(Message(role="system", content=f"Generate audio following instruction.\n\n<|scene_desc_start|>\n{scene_prompt}\n<|scene_desc_end|>"))
-                messages.append(Message(role="user", content=ref_transcript))
-                messages.append(Message(role="assistant", content=AudioContent(audio_url=ref_audio_path)))
-        elif self.task_type == "multi_speaker_voice_cloning":
-            ref_speakers = sample.get("ref_speakers")
-            if not ref_speakers or not isinstance(ref_speakers, list):
-                return [Message(role="system", content=MULTISPEAKER_DEFAULT_SYSTEM_MESSAGE)]
-            for i, ref_info in enumerate(ref_speakers):
-                messages.append(Message(role="user", content=f"{ref_info.get('speaker_tag', f'[SPEAKER{i}]')} {ref_info.get('ref_transcript', 'This is a voice sample.')}"))
-                messages.append(Message(role="assistant", content=AudioContent(audio_url=str(self.data_dir / ref_info['ref_audio_file']))))
-            messages.insert(0, Message(role="system", content=f"Generate audio following instruction.\n\n<|scene_desc_start|>\n{scene_prompt}\n<|scene_desc_end|>"))
-        elif self.task_type == "multi_speaker_smart_voice" and len(speaker_tags) > 1:
-            speaker_desc_l = [f"{tag}: {'feminine' if i % 2 == 0 else 'masculine'}" for i, tag in enumerate(speaker_tags)]
-            scene_desc = f"{scene_prompt}\n\n" + "\n".join(speaker_desc_l) if scene_prompt else "\n".join(speaker_desc_l)
-            messages.append(Message(role="system", content=f"{MULTISPEAKER_DEFAULT_SYSTEM_MESSAGE}\n\n<|scene_desc_start|>\n{scene_desc}\n<|scene_desc_end|>"))
+        # Concatenate tensors
+        if context_audio_tokens:
+            audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
+            audio_ids_start = torch.tensor(
+                np.cumsum(np.array([0] + [t.shape[1] for t in context_audio_tokens[:-1]])),
+                dtype=torch.long
+            )
         else:
-            content = "Generate audio following instruction."
-            if scene_prompt: content += f"\n\n<|scene_desc_start|>\n{scene_prompt}\n<|scene_desc_end|>"
-            messages.append(Message(role="system", content=content))
-        return messages
+            audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
+            audio_ids_start = torch.tensor([0], dtype=torch.long)
+
+        label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
+
+        return ChatMLDatasetSample(
+            input_ids=torch.tensor(input_tokens, dtype=torch.long),
+            label_ids=torch.tensor(label_tokens, dtype=torch.long),
+            audio_ids_concat=audio_ids_concat,
+            audio_ids_start=audio_ids_start,
+            label_audio_ids=label_audio_ids,
+            audio_waveforms_concat=waveform,
+            audio_waveforms_start=torch.tensor([0], dtype=torch.long),
+            audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
+            audio_speaker_indices=torch.tensor([0], dtype=torch.long),
+        )
+
+    def _prepare_zero_shot_voice_cloning_sample(self, sample: Dict) -> ChatMLDatasetSample:
+        """Prepare sample for zero-shot voice cloning task"""
+        text = sample["text"]
+        audio_path = sample["audio_path"]
+        
+        # Create system message for zero-shot voice cloning
+        system_message = "Generate speech in the provided voice."
+        system_content = Message(role="system", content=system_message)
+        
+        # Load and encode reference audio
+        waveform, sr = self._load_audio_waveform(audio_path)
+        audio_tokens = self._encode_audio_tokens(audio_path)
+        
+        # Create messages for zero-shot voice cloning
+        messages = [
+            Message(role="system", content=system_content),
+            Message(role="user", content=text),
+            Message(role="assistant", content=AudioContent(audio_url=audio_path))
+        ]
+        
+        chatml_sample = ChatMLSample(messages=messages)
+        
+        # Process with prepare function
+        input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(
+            chatml_sample, self.tokenizer
+        )
+        
+        # Process audio data
+        context_audio_tokens = []
+        for audio_content in (audio_contents or []):
+            if audio_content.audio_url:
+                tokens = self._encode_audio_tokens(audio_content.audio_url)
+                if tokens is not None:
+                    context_audio_tokens.append(tokens)
+
+        label_audio_tokens = []
+        for audio_label_content in (audio_label_contents or []):
+            if audio_label_content and audio_label_content.audio_url:
+                tokens = self._encode_audio_tokens(audio_label_content.audio_url)
+                if tokens is not None:
+                    label_audio_tokens.append(tokens)
+
+        # Concatenate tensors
+        if context_audio_tokens:
+            audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
+            audio_ids_start = torch.tensor(
+                np.cumsum(np.array([0] + [t.shape[1] for t in context_audio_tokens[:-1]])),
+                dtype=torch.long
+            )
+        else:
+            audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
+            audio_ids_start = torch.tensor([0], dtype=torch.long)
+
+        label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
+
+        return ChatMLDatasetSample(
+            input_ids=torch.tensor(input_tokens, dtype=torch.long),
+            label_ids=torch.tensor(label_tokens, dtype=torch.long),
+            audio_ids_concat=audio_ids_concat,
+            audio_ids_start=audio_ids_start,
+            label_audio_ids=label_audio_ids,
+            audio_waveforms_concat=waveform,
+            audio_waveforms_start=torch.tensor([0], dtype=torch.long),
+            audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
+            audio_speaker_indices=torch.tensor([0], dtype=torch.long),
+        )
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx: int) -> ChatMLDatasetSample:
+        """Get a dataset sample by index"""
         sample = self.samples[idx]
+        task_type = sample.get("task_type", self.task_type)
+        
         try:
-            with open(sample["transcript_file"], 'r', encoding='utf-8') as f:
-                transcript = self._normalize_transcript(f.read().strip())
-
-            messages = self._create_messages_for_task(sample, transcript)
-            messages.append(Message(role="user", content=transcript))
-            messages.append(Message(role="assistant", content=AudioContent(audio_url=sample["audio_file"])))
-
-            input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(ChatMLSample(messages=messages), self.tokenizer)
-
-            context_audio_tokens = [self._encode_audio_tokens(ac.audio_url) for ac in (audio_contents or []) if ac.audio_url]
-            context_audio_tokens = [t for t in context_audio_tokens if t is not None]
-
-            label_audio_tokens = [self._encode_audio_tokens(alc.audio_url) for alc in (audio_label_contents or []) if alc.audio_url]
-            label_audio_tokens = [t for t in label_audio_tokens if t is not None]
-
-            if context_audio_tokens:
-                audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
-                audio_ids_start = torch.tensor([0] + [t.shape[1] for t in context_audio_tokens[:-1]], dtype=torch.long).cumsum(0)
+            if task_type == "multi_speaker_smart_voice":
+                return self._prepare_multispeaker_smart_voice_sample(sample)
+            elif task_type == "zero_shot_voice_cloning":
+                return self._prepare_zero_shot_voice_cloning_sample(sample)
             else:
-                audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
-                audio_ids_start = torch.tensor([0], dtype=torch.long)
+                # Default handling for other task types
+                text = sample["text"]
+                audio_path = sample["audio_path"]
+                
+                # Load and encode audio
+                waveform, sr = self._load_audio_waveform(audio_path)
+                audio_tokens = self._encode_audio_tokens(audio_path)
+                
+                # Simple message structure for other tasks
+                messages = [
+                    Message(role="user", content=text),
+                    Message(role="assistant", content=AudioContent(audio_url=audio_path))
+                ]
+                
+                chatml_sample = ChatMLSample(messages=messages)
+                
+                # Process with prepare function
+                input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(
+                    chatml_sample, self.tokenizer
+                )
+                
+                # Process audio data
+                context_audio_tokens = []
+                for audio_content in (audio_contents or []):
+                    if audio_content.audio_url:
+                        tokens = self._encode_audio_tokens(audio_content.audio_url)
+                        if tokens is not None:
+                            context_audio_tokens.append(tokens)
 
-            label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
-            waveform, sr = self._load_audio_waveform(sample["audio_file"])
+                label_audio_tokens = []
+                for audio_label_content in (audio_label_contents or []):
+                    if audio_label_content and audio_label_content.audio_url:
+                        tokens = self._encode_audio_tokens(audio_label_content.audio_url)
+                        if tokens is not None:
+                            label_audio_tokens.append(tokens)
 
-            dataset_sample = ChatMLDatasetSample(
-                input_ids=torch.tensor(input_tokens, dtype=torch.long),
-                label_ids=torch.tensor(label_tokens, dtype=torch.long),
-                audio_ids_concat=audio_ids_concat,
-                audio_ids_start=audio_ids_start,
-                label_audio_ids=label_audio_ids,
-                audio_waveforms_concat=waveform,
+                # Concatenate tensors
+                if context_audio_tokens:
+                    audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
+                    audio_ids_start = torch.tensor(
+                        np.cumsum(np.array([0] + [t.shape[1] for t in context_audio_tokens[:-1]])),
+                        dtype=torch.long
+                    )
+                else:
+                    audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
+                    audio_ids_start = torch.tensor([0], dtype=torch.long)
+
+                label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
+
+                return ChatMLDatasetSample(
+                    input_ids=torch.tensor(input_tokens, dtype=torch.long),
+                    label_ids=torch.tensor(label_tokens, dtype=torch.long),
+                    audio_ids_concat=audio_ids_concat,
+                    audio_ids_start=audio_ids_start,
+                    label_audio_ids=label_audio_ids,
+                    audio_waveforms_concat=waveform,
+                    audio_waveforms_start=torch.tensor([0], dtype=torch.long),
+                    audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
+                    audio_speaker_indices=torch.tensor([0], dtype=torch.long),
+                )
+                
+        except Exception as e:
+            logger.error(f"Error processing sample at index {idx}: {e}", exc_info=True)
+            # Return a simple fallback sample
+            return ChatMLDatasetSample(
+                input_ids=torch.tensor([0], dtype=torch.long),
+                label_ids=torch.tensor([-100], dtype=torch.long),
+                audio_ids_concat=torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long),
+                audio_ids_start=torch.tensor([0], dtype=torch.long),
+                label_audio_ids=None,
+                audio_waveforms_concat=torch.zeros(1),
                 audio_waveforms_start=torch.tensor([0], dtype=torch.long),
-                audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
+                audio_sample_rate=torch.tensor([24000], dtype=torch.float32),
                 audio_speaker_indices=torch.tensor([0], dtype=torch.long),
             )
-            
-            return dataset_sample
-
-        except Exception as e:
-            logger.error(f"Error processing sample at index {idx} (ID: {sample.get('audio_id', 'N/A')}): {e}", exc_info=True)
-            return self.__getitem__((idx + 1) % len(self))
 
 
 class HiggsAudioModelWrapper(nn.Module):
     """Wrapper for Higgs Audio v2 model to enable training"""
-    def __init__(self, model_path: str, device: str = 'cuda:0', args=None):
+    def __init__(self, model_path: str, device: str = 'cuda', args=None):
         super().__init__()
         if HIGGS_AVAILABLE:
             self.model = HiggsAudioModel.from_pretrained(
@@ -375,7 +564,6 @@ class HiggsAudioModelWrapper(nn.Module):
             from transformers import AutoModel
             self.model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
             self.config = self.model.config
-        
         self.model = self.model.to(device)
         
         if args:
@@ -388,8 +576,12 @@ class HiggsAudioModelWrapper(nn.Module):
         return self.model.device
           
     def forward(self, **kwargs):
+        """
+        Forward pass with proper type alignment.
+        This follows the same pattern as the inference script.
+        """
         # --- 开始终极修复 ---
-        # 在数据进入底层模型前，强制将所有浮点张量的类型与模型权重对齐。
+        # 在数据进入底层模型之前，强制将所有浮点张量类型与模型权重对齐。
         # 这是解决顽固类型不匹配问题的最可靠方法。
         model_dtype = next(self.model.parameters()).dtype
         
@@ -584,12 +776,16 @@ def main():
 
     if trainer.is_world_process_zero():
         trainer.save_model()
-        logger.info(f"Model saved to {args.output_dir}")
+        logger.info(f"Model checkpoints saved to {args.output_dir}")
         if args.use_lora:
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
             model_to_save.save_pretrained(lora_output_dir)
-            logger.info(f"LoRA adapters saved to {lora_output_dir}")
+            logger.info(f"LoRA adapters saved separately to {lora_output_dir}")
+            logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
+            logger.info("To merge LoRA adapters with base model, use the merger.py script:")
+            logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
+            logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
 
 if __name__ == "__main__":
     main()

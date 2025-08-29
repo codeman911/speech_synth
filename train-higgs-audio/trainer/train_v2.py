@@ -964,6 +964,10 @@ def main():
         else:
             model.save_pretrained(lora_output_dir)
         logger.info(f"LoRA adapters saved to {lora_output_dir}")
+        logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
+        logger.info("To merge LoRA adapters with base model, use the merger.py script:")
+        logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
+        logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
 
 
 if __name__ == "__main__":

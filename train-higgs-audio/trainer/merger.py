@@ -83,43 +83,53 @@ class HiggsAudioLoRaMerger:
         lora_adapter_path = os.path.normpath(self.lora_adapter_path)
         
         # Check if this is a checkpoint directory and suggest the correct lora_adapters path
-        if "checkpoint-" in lora_adapter_path and not os.path.exists(os.path.join(lora_adapter_path, "adapter_config.json")):
+        if "checkpoint-" in lora_adapter_path:
             # Look for lora_adapters directory in the parent directory
             parent_dir = os.path.dirname(lora_adapter_path)
             lora_adapters_dir = os.path.join(parent_dir, "lora_adapters")
             if os.path.exists(lora_adapters_dir):
-                logger.warning(f"It looks like you're trying to use a checkpoint directory. "
-                              f"LoRA adapters are saved separately in: {lora_adapters_dir}")
-                # Update the path to use the lora_adapters directory instead
-                lora_adapter_path = lora_adapters_dir
-                logger.info(f"Using LoRA adapters from: {lora_adapter_path}")
+                logger.error("CRITICAL ERROR: You are trying to use a CHECKPOINT directory!")
+                logger.error("LoRA adapters are SAVED SEPARATELY in a 'lora_adapters' directory.")
+                logger.error(f"Use this path instead: {lora_adapters_dir}")
+                logger.error("DO NOT use checkpoint directories for merging LoRA adapters!")
+                raise ValueError(f"Invalid path: {lora_adapter_path} is a checkpoint directory, not a LoRA adapters directory. "
+                               f"Use {lora_adapters_dir} instead.")
+            else:
+                # Check if lora_adapters exists in the output directory
+                output_dir = parent_dir
+                while output_dir and "checkpoint-" in os.path.basename(output_dir):
+                    output_dir = os.path.dirname(output_dir)
+                if output_dir and os.path.exists(os.path.join(output_dir, "lora_adapters")):
+                    suggested_path = os.path.join(output_dir, "lora_adapters")
+                    logger.error("CRITICAL ERROR: You are trying to use a CHECKPOINT directory!")
+                    logger.error("LoRA adapters are SAVED SEPARATELY in a 'lora_adapters' directory.")
+                    logger.error(f"Use this path instead: {suggested_path}")
+                    logger.error("DO NOT use checkpoint directories for merging LoRA adapters!")
+                    raise ValueError(f"Invalid path: {lora_adapter_path} is a checkpoint directory, not a LoRA adapters directory. "
+                                   f"Use {suggested_path} instead.")
+                else:
+                    logger.error("CRITICAL ERROR: You are trying to use a CHECKPOINT directory!")
+                    logger.error("LoRA adapters are SAVED SEPARATELY in a 'lora_adapters' directory.")
+                    logger.error("Please check your training output directory for a 'lora_adapters' folder.")
+                    logger.error("DO NOT use checkpoint directories for merging LoRA adapters!")
+                    # Show how to find lora_adapters directories
+                    logger.error("To find the correct lora_adapters directory, run:")
+                    logger.error("  python find_lora_adapters.py --path /path/to/your/training/output")
+                    raise ValueError(f"Invalid path: {lora_adapter_path} is a checkpoint directory, not a LoRA adapters directory.")
         
-        # Check if adapter_config.json exists, if not, create it on the fly
+        # Check if adapter_config.json exists
         adapter_config_path = Path(lora_adapter_path) / "adapter_config.json"
         if not adapter_config_path.exists():
-            logger.warning(f"adapter_config.json not found in {lora_adapter_path}. Creating it on the fly.")
-            # Create a default LoRA config
-            default_config = {
-                "base_model_name_or_path": os.path.abspath(self.base_model_path),
-                "task_type": "CAUSAL_LM",
-                "peft_type": "LORA",
-                "r": 16,
-                "lora_alpha": 32,
-                "lora_dropout": 0.1,
-                "target_modules": [
-                    "q_proj", "v_proj", "k_proj", "o_proj",
-                    "gate_proj", "up_proj", "down_proj"
-                ],
-                "bias": "none",
-                "modules_to_save": None,
-                "fan_in_fan_out": False,
-                "inference_mode": True
-            }
-            # Ensure the directory exists
-            adapter_config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(adapter_config_path, 'w') as f:
-                json.dump(default_config, f, indent=2)
-            logger.info(f"Created default adapter_config.json at {adapter_config_path}")
+            logger.error(f"adapter_config.json not found in {lora_adapter_path}.")
+            logger.error("This directory does not appear to contain LoRA adapters.")
+            logger.error("LoRA adapters are saved in a separate 'lora_adapters' directory, not in checkpoint directories.")
+            # Show how to find lora_adapters directories
+            logger.error("To find the correct lora_adapters directory, run:")
+            logger.error("  python find_lora_adapters.py --path /path/to/your/training/output")
+            raise ValueError(f"adapter_config.json not found in {lora_adapter_path}. "
+                           f"This directory does not appear to contain LoRA adapters. "
+                           f"LoRA adapters are saved in a separate 'lora_adapters' directory, "
+                           f"not in checkpoint directories.")
         
         # Check if adapter model files exist
         adapter_model_files = [
@@ -129,25 +139,20 @@ class HiggsAudioLoRaMerger:
         adapter_model_exists = any(os.path.exists(f) for f in adapter_model_files)
         
         if not adapter_model_exists:
-            # Check if there are checkpoint files in the directory
-            checkpoint_files = [f for f in os.listdir(lora_adapter_path) if f.startswith("checkpoint") and f.endswith((".bin", ".safetensors"))]
-            if checkpoint_files:
-                logger.info(f"Found checkpoint files: {checkpoint_files}")
-            else:
-                logger.warning(f"No adapter model files found in {lora_adapter_path}")
-                # List contents of the directory for debugging
-                try:
-                    contents = os.listdir(lora_adapter_path)
-                    logger.info(f"Directory contents: {contents}")
-                except Exception as e:
-                    logger.warning(f"Could not list directory contents: {e}")
+            logger.error(f"Neither adapter_model.bin nor adapter_model.safetensors found in {lora_adapter_path}.")
+            logger.error("This directory does not contain valid LoRA adapter files.")
+            # Show how to find lora_adapters directories
+            logger.error("To find the correct lora_adapters directory, run:")
+            logger.error("  python find_lora_adapters.py --path /path/to/your/training/output")
+            raise ValueError(f"Neither adapter_model.bin nor adapter_model.safetensors found in {lora_adapter_path}. "
+                           f"This directory does not contain valid LoRA adapter files.")
         
         # Load LoRA config with local_files_only=True to avoid remote repo issues
         try:
             peft_config = PeftConfig.from_pretrained(lora_adapter_path, local_files_only=True)
         except Exception as e:
             logger.warning(f"Failed to load config with local_files_only=True: {e}. Trying without it.")
-            peft_config = PeftConfig.from_pretrained(lora_adapter_path, local_files_only=True)
+            peft_config = PeftConfig.from_pretrained(lora_adapter_path)
         logger.info(f"LoRA config: {peft_config}")
         
         # Load model with LoRA adapters
@@ -165,8 +170,7 @@ class HiggsAudioLoRaMerger:
                 self.base_model,
                 lora_adapter_path,
                 config=peft_config,
-                is_trainable=False,  # Make sure we're loading for inference
-                local_files_only=True
+                is_trainable=False  # Make sure we're loading for inference
             )
         
         logger.info("LoRA model loaded successfully")
@@ -313,7 +317,7 @@ def main():
         "--lora_adapter_path", 
         type=str, 
         required=True,
-        help="Path to LoRA adapter directory"
+        help="Path to LoRA adapter directory (NOT a checkpoint directory - use the separate 'lora_adapters' directory)"
     )
     parser.add_argument(
         "--output_path", 
@@ -349,40 +353,10 @@ def main():
     
     # Validate paths
     if not os.path.exists(args.lora_adapter_path):
-        # Provide comprehensive guidance for finding the correct path
-        guidance_messages = []
-        
-        # Check if this might be a checkpoint path and suggest the correct lora_adapters path
-        if "checkpoint-" in args.lora_adapter_path:
-            parent_dir = os.path.dirname(args.lora_adapter_path)
-            # Look for lora_adapters directory in the parent directory
-            if os.path.exists(parent_dir):
-                lora_adapters_dir = os.path.join(parent_dir, "lora_adapters")
-                if os.path.exists(lora_adapters_dir):
-                    guidance_messages.append(f"LoRA adapters are saved separately. Try: {lora_adapters_dir}")
-                else:
-                    # Look for lora_adapters in the output directory
-                    output_dir = parent_dir
-                    while output_dir and "checkpoint-" in os.path.basename(output_dir):
-                        output_dir = os.path.dirname(output_dir)
-                    if output_dir and os.path.exists(os.path.join(output_dir, "lora_adapters")):
-                        suggested_path = os.path.join(output_dir, "lora_adapters")
-                        guidance_messages.append(f"LoRA adapters are saved in the output directory. Try: {suggested_path}")
-        
-        # Check parent directories for lora_adapters
-        parent_dir = os.path.dirname(args.lora_adapter_path)
-        while parent_dir and parent_dir != "/":
-            lora_adapters_dir = os.path.join(parent_dir, "lora_adapters")
-            if os.path.exists(lora_adapters_dir):
-                guidance_messages.append(f"Found lora_adapters directory. Try: {lora_adapters_dir}")
-                break
-            parent_dir = os.path.dirname(parent_dir)
-        
-        if guidance_messages:
-            error_msg = f"LoRA adapter path does not exist: {args.lora_adapter_path}\n" + "\n".join(guidance_messages)
-            raise ValueError(error_msg)
-        else:
-            raise ValueError(f"LoRA adapter path does not exist: {args.lora_adapter_path}")
+        logger.error(f"LoRA adapter path does not exist: {args.lora_adapter_path}")
+        logger.error("To find the correct lora_adapters directory, run:")
+        logger.error("  python find_lora_adapters.py --path /path/to/your/training/output")
+        raise ValueError(f"LoRA adapter path does not exist: {args.lora_adapter_path}")
     
     # Additional validation to ensure we have the required files
     adapter_config_path = Path(args.lora_adapter_path) / "adapter_config.json"
@@ -392,8 +366,24 @@ def main():
     ]
     adapter_model_exists = any(os.path.exists(f) for f in adapter_model_files)
     
-    if not adapter_config_path.exists() and not adapter_model_exists:
-        raise ValueError(f"LoRA adapter directory {args.lora_adapter_path} does not contain required files (adapter_config.json and/or adapter_model files)")
+    if not adapter_config_path.exists():
+        logger.error(f"adapter_config.json not found in {args.lora_adapter_path}.")
+        logger.error("This directory does not appear to contain LoRA adapters.")
+        logger.error("LoRA adapters are saved in a separate 'lora_adapters' directory, not in checkpoint directories.")
+        logger.error("To find the correct lora_adapters directory, run:")
+        logger.error("  python find_lora_adapters.py --path /path/to/your/training/output")
+        raise ValueError(f"adapter_config.json not found in {args.lora_adapter_path}. "
+                       f"This directory does not appear to contain LoRA adapters. "
+                       f"LoRA adapters are saved in a separate 'lora_adapters' directory, "
+                       f"not in checkpoint directories.")
+    
+    if not adapter_model_exists:
+        logger.error(f"Neither adapter_model.bin nor adapter_model.safetensors found in {args.lora_adapter_path}.")
+        logger.error("This directory does not contain valid LoRA adapter files.")
+        logger.error("To find the correct lora_adapters directory, run:")
+        logger.error("  python find_lora_adapters.py --path /path/to/your/training/output")
+        raise ValueError(f"Neither adapter_model.bin nor adapter_model.safetensors found in {args.lora_adapter_path}. "
+                       f"This directory does not contain valid LoRA adapter files.")
         
     # Initialize merger
     merger = HiggsAudioLoRaMerger(args.base_model_path, args.lora_adapter_path)

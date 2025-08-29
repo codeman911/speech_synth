@@ -35,6 +35,8 @@ graph TD
 - `train_v2.py`: Single GPU training script
 - `train_v2_ddp.py`: Multi-GPU training script with DDP support
 - `chatml_zero_shot_example.json`: Sample ChatML dataset format
+- `merger.py`: Script to merge LoRA adapters with base model
+- `find_lora_adapters.py`: Helper script to locate LoRA adapters directories
 
 ## Dataset Format
 
@@ -205,3 +207,43 @@ The training loop follows standard Hugging Face Trainer patterns with customizat
 2. **Zero-Shot Capability**: Trained model will support zero-shot voice cloning as intended
 3. **Performance**: Efficient training with LoRA and mixed precision support
 4. **Compatibility**: Works with existing Higgs Audio model checkpoints and tokenizers
+
+## LoRA Adapters and Model Merging
+
+When training with LoRA enabled (`--use_lora`), the training scripts save LoRA adapters separately from model checkpoints:
+
+### Directory Structure
+```
+output/
+├── checkpoint-1000/          # Model checkpoint (does NOT contain LoRA adapters)
+├── checkpoint-2000/          # Model checkpoint (does NOT contain LoRA adapters)
+├── lora_adapters/            # LoRA adapters (this is what you need for merging)
+│   ├── adapter_config.json
+│   ├── adapter_model.bin
+│   └── README.md
+└── trainer_state.json
+```
+
+### Important Notes
+1. **LoRA adapters are saved in a separate `lora_adapters` directory**, NOT in checkpoint directories
+2. **Checkpoint directories do NOT contain LoRA adapters** - they only contain full model checkpoints
+3. **To merge LoRA adapters with the base model, use the `lora_adapters` directory**
+
+### Merging LoRA Adapters
+To merge LoRA adapters with the base model, use the `merger.py` script:
+
+```bash
+python trainer/merger.py \
+    --base_model_path bosonai/higgs-audio-v2-generation-3B-base \
+    --lora_adapter_path ./output/lora_adapters \
+    --output_path ./merged_model
+```
+
+### Finding LoRA Adapters
+If you're unsure where your LoRA adapters are located, use the helper script:
+
+```bash
+python trainer/find_lora_adapters.py --path /path/to/your/training/output
+```
+
+This will search for valid LoRA adapters directories and show you their locations.
