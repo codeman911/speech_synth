@@ -852,12 +852,13 @@ def main():
 
     if trainer.is_world_process_zero():
         trainer.save_model()
-        logger.info(f"Model saved to {args.output_dir}")
+        logger.info(f"Model checkpoints saved to {args.output_dir}")
         if args.use_lora:
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
             model_to_save.save_pretrained(lora_output_dir)
-            logger.info(f"LoRA adapters saved to {lora_output_dir}")
+            logger.info(f"LoRA adapters saved separately to {lora_output_dir}")
+            logger.info("IMPORTANT: To merge LoRA adapters, use the lora_adapters directory, NOT the checkpoint directories!")
 
 if __name__ == "__main__":
     main()

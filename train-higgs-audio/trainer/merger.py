@@ -147,7 +147,7 @@ class HiggsAudioLoRaMerger:
             peft_config = PeftConfig.from_pretrained(lora_adapter_path, local_files_only=True)
         except Exception as e:
             logger.warning(f"Failed to load config with local_files_only=True: {e}. Trying without it.")
-            peft_config = PeftConfig.from_pretrained(lora_adapter_path)
+            peft_config = PeftConfig.from_pretrained(lora_adapter_path, local_files_only=True)
         logger.info(f"LoRA config: {peft_config}")
         
         # Load model with LoRA adapters
@@ -165,7 +165,8 @@ class HiggsAudioLoRaMerger:
                 self.base_model,
                 lora_adapter_path,
                 config=peft_config,
-                is_trainable=False  # Make sure we're loading for inference
+                is_trainable=False,  # Make sure we're loading for inference
+                local_files_only=True
             )
         
         logger.info("LoRA model loaded successfully")
@@ -382,6 +383,17 @@ def main():
             raise ValueError(error_msg)
         else:
             raise ValueError(f"LoRA adapter path does not exist: {args.lora_adapter_path}")
+    
+    # Additional validation to ensure we have the required files
+    adapter_config_path = Path(args.lora_adapter_path) / "adapter_config.json"
+    adapter_model_files = [
+        os.path.join(args.lora_adapter_path, "adapter_model.bin"),
+        os.path.join(args.lora_adapter_path, "adapter_model.safetensors")
+    ]
+    adapter_model_exists = any(os.path.exists(f) for f in adapter_model_files)
+    
+    if not adapter_config_path.exists() and not adapter_model_exists:
+        raise ValueError(f"LoRA adapter directory {args.lora_adapter_path} does not contain required files (adapter_config.json and/or adapter_model files)")
         
     # Initialize merger
     merger = HiggsAudioLoRaMerger(args.base_model_path, args.lora_adapter_path)
