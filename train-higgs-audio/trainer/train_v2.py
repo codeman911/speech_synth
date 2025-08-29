@@ -783,6 +783,8 @@ def main():
                        help="Save checkpoint every X updates steps")
     parser.add_argument("--eval_steps", type=int, default=500,
                        help="Evaluate every X updates steps")
+    parser.add_argument("--disable_evaluation", action="store_true", default=False,
+                       help="Disable evaluation during training to avoid checkpoint/evaluation mismatch")
     
     # LoRA arguments
     parser.add_argument("--use_lora", action="store_true", default=False,
@@ -886,6 +888,9 @@ def main():
         eval_dataset = None
         logger.info(f"Using all data for training: {len(train_dataset)} samples")
     
+    # Determine if evaluation should be enabled
+    evaluation_enabled = eval_dataset is not None and not args.disable_evaluation
+    
     # Setup training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -896,11 +901,11 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        eval_steps=args.eval_steps,
-        evaluation_strategy="steps" if eval_dataset else "no",
+        eval_steps=args.eval_steps if evaluation_enabled else None,
+        evaluation_strategy="steps" if evaluation_enabled else "no",
         save_total_limit=3,
-        load_best_model_at_end=True if eval_dataset else False,
-        metric_for_best_model="eval_loss" if eval_dataset else None,
+        load_best_model_at_end=evaluation_enabled,  # Only True when evaluation is enabled
+        metric_for_best_model="eval_loss" if evaluation_enabled else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
@@ -909,7 +914,21 @@ def main():
         logging_dir=args.logging_dir,
         ddp_find_unused_parameters=True,  # For DDD compatibility
     )
-    
+
+    # Define a compute_metrics function that works with our model
+    def compute_metrics(eval_pred):
+        """Compute metrics for evaluation"""
+        # For our model, the loss is already computed and returned in the predictions
+        # eval_pred is a tuple of (predictions, labels)
+        predictions = eval_pred.predictions if hasattr(eval_pred, 'predictions') else eval_pred[0]
+        
+        # If predictions is a dict with loss, return it
+        if isinstance(predictions, dict) and 'loss' in predictions:
+            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
+        else:
+            # Return a default value
+            return {"eval_loss": 0.0}
+
     # Setup data collator configured to match inference script exactly
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
         try:
@@ -944,6 +963,7 @@ def main():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        compute_metrics=compute_metrics if evaluation_enabled else None,
     )
     
     # Start training

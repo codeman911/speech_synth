@@ -276,3 +276,13 @@ A recent fix was implemented to resolve an issue with checkpoint saving during t
 - **Impact**: Training with checkpoint saving now works correctly, including LoRA adapter saving during checkpoints
 
 For more details about this fix, see [CHECKPOINT_FIX_SUMMARY.md](CHECKPOINT_FIX_SUMMARY.md).
+
+### Evaluation/Checkpoint Mismatch Fix
+
+A fix was implemented to resolve an issue with evaluation/checkpoint mismatch:
+
+- **Problem**: `ValueError: --load_best_model_at_end requires the saving steps to be a round multiple of the evaluation steps`
+- **Solution**: Added a `--disable_evaluation` flag to all training scripts to allow users to explicitly disable evaluation when needed
+- **Impact**: Users can now run training with any combination of `save_steps` and `eval_steps` by disabling evaluation when needed
+
+For more details about this fix, see [EVALUATION_FIX_SUMMARY.md](EVALUATION_FIX_SUMMARY.md).

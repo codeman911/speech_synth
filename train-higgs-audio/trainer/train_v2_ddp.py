@@ -883,6 +883,7 @@ def main():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        compute_metrics=compute_metrics if evaluation_enabled else None,
     )
 
     logger.info(f"Starting zero-shot voice cloning training on device: {device}")
