@@ -739,6 +739,13 @@ def main():
         lora_config = {"rank": args.lora_rank, "alpha": args.lora_alpha, "dropout": args.lora_dropout}
         model = setup_lora_config(model, lora_config)
         logger.info("LoRA configuration applied")
+        # Add logging to verify LoRA model
+        logger.info(f"Model type after LoRA setup: {type(model)}")
+        if hasattr(model, 'model'):
+            logger.info(f"Model.model type: {type(model.model)}")
+            if hasattr(model.model, 'text_model'):
+                logger.info(f"Model.model.text_model type: {type(model.model.text_model)}")
+        logger.info(f"Model has PeftModel attributes: {hasattr(model, 'save_pretrained')}")
 
     # Load training dataset
     full_train_dataset = ZeroShotVoiceCloningDataset(args.train_data_file, tokenizer, audio_tokenizer)
@@ -854,14 +861,22 @@ def main():
         trainer.save_model()
         logger.info(f"Model checkpoints saved to {args.output_dir}")
         if args.use_lora:
+            logger.info("LoRA flag is set, attempting to save LoRA adapters...")
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
+            logger.info(f"LoRA output directory: {lora_output_dir}")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            model_to_save.save_pretrained(lora_output_dir)
-            logger.info(f"LoRA adapters saved separately to {lora_output_dir}")
-            logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
-            logger.info("To merge LoRA adapters with base model, use the merger.py script:")
-            logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
-            logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
+            logger.info(f"Model to save type: {type(model_to_save)}")
+            logger.info(f"Model to save has PeftModel attributes: {hasattr(model_to_save, 'save_pretrained')}")
+            try:
+                model_to_save.save_pretrained(lora_output_dir)
+                logger.info(f"LoRA adapters saved separately to {lora_output_dir}")
+                logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
+                logger.info("To merge LoRA adapters with base model, use the merger.py script:")
+                logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
+                logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
+            except Exception as e:
+                logger.error(f"Failed to save LoRA adapters: {e}")
+                logger.error("Traceback:", exc_info=True)
         else:
             logger.info("NOTE: LoRA adapters were not saved because --use_lora flag was not specified.")
             logger.info("To save LoRA adapters, add --use_lora to your training command.")

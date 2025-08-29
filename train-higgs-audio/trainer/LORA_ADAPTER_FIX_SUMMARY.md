@@ -72,3 +72,20 @@ python trainer/merger.py \
 5. `train_v2_ddp.py` - Enhanced logging messages
 6. `trainer.py` - Enhanced logging messages
 7. `trainer_ddp.py` - Enhanced logging messages
+
+## Enhanced Debugging for LoRA Adapter Saving
+
+To help debug issues with LoRA adapter saving, enhanced logging has been added to both training scripts:
+
+1. **Detailed logging during LoRA setup**: After applying LoRA configuration, the scripts now log detailed information about the model structure
+2. **Detailed logging during LoRA saving**: Before and during the saving process, the scripts log information about the model being saved and any errors that occur
+
+If you're experiencing issues with LoRA adapters not being saved, check the logs for:
+- "LoRA flag is set, attempting to save LoRA adapters..."
+- "Model to save type: ..."
+- Any error messages that might indicate why saving is failing
+
+These enhanced logs will help identify whether the issue is with:
+- The LoRA configuration not being applied correctly
+- The model not being properly converted to a LoRA model
+- Issues during the saving process

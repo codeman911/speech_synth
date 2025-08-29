@@ -16,7 +16,7 @@ This document describes the new training pipeline for Higgs Audio v2 that is spe
 
 ## Architecture
 
-```mermaid
+```
 graph TD
     A[ChatML Dataset] --> B[ZeroShotVoiceCloningDataset]
     B --> C[HiggsAudioTrainer]
@@ -42,7 +42,7 @@ graph TD
 
 The training pipeline expects datasets in ChatML JSON format with the following structure:
 
-```json
+```
 {
   "messages": [
     {
@@ -207,6 +207,23 @@ The training loop follows standard Hugging Face Trainer patterns with customizat
 2. **Zero-Shot Capability**: Trained model will support zero-shot voice cloning as intended
 3. **Performance**: Efficient training with LoRA and mixed precision support
 4. **Compatibility**: Works with existing Higgs Audio model checkpoints and tokenizers
+
+## Enhanced Debugging for LoRA Adapter Saving
+
+To help debug issues with LoRA adapter saving, enhanced logging has been added to both training scripts:
+
+1. **Detailed logging during LoRA setup**: After applying LoRA configuration, the scripts now log detailed information about the model structure
+2. **Detailed logging during LoRA saving**: Before and during the saving process, the scripts log information about the model being saved and any errors that occur
+
+If you're experiencing issues with LoRA adapters not being saved, check the logs for:
+- "LoRA flag is set, attempting to save LoRA adapters..."
+- "Model to save type: ..."
+- Any error messages that might indicate why saving is failing
+
+These enhanced logs will help identify whether the issue is with:
+- The LoRA configuration not being applied correctly
+- The model not being properly converted to a LoRA model
+- Issues during the saving process
 
 ## LoRA Adapters and Model Merging
 
