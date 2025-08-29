@@ -616,8 +616,15 @@ class HiggsAudioTrainer(Trainer):
         )
         
         # Ensure eval_loss is in the metrics
-        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss'):
-            eval_result.metrics["eval_loss"] = eval_result.loss
+        if "eval_loss" not in eval_result.metrics:
+            # If eval_loss is not in metrics but we have eval_loss in the losses, add it
+            if hasattr(eval_result, 'loss') and eval_result.loss is not None:
+                eval_result.metrics["eval_loss"] = eval_result.loss
+            # If we still don't have eval_loss, set it to 0.0 to avoid KeyError
+            elif "loss" in eval_result.metrics:
+                eval_result.metrics["eval_loss"] = eval_result.metrics["loss"]
+            else:
+                eval_result.metrics["eval_loss"] = 0.0
             
         return eval_result
         
