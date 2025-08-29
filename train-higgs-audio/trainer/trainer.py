@@ -681,12 +681,27 @@ def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     
     model = model.to(device)
     
+    logger.info(f"Applying LoRA configuration to model of type: {type(model)}")
+    
     if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
+        logger.info("Applying LoRA to model.model.text_model")
         model.model.text_model = get_peft_model(model.model.text_model, peft_config)
+        logger.info(f"Model.model.text_model type after LoRA: {type(model.model.text_model)}")
     elif hasattr(model, 'model'):
+        logger.info("Applying LoRA to model.model")
         model.model = get_peft_model(model.model, peft_config)
+        logger.info(f"Model.model type after LoRA: {type(model.model)}")
     else:
+        logger.info("Applying LoRA to model directly")
         model = get_peft_model(model, peft_config)
+        logger.info(f"Model type after LoRA: {type(model)}")
+    
+    # Verify that the model has the save_pretrained method
+    logger.info(f"Model has save_pretrained method: {hasattr(model, 'save_pretrained')}")
+    if hasattr(model, 'model'):
+        logger.info(f"Model.model has save_pretrained method: {hasattr(model.model, 'save_pretrained')}")
+        if hasattr(model.model, 'text_model'):
+            logger.info(f"Model.model.text_model has save_pretrained method: {hasattr(model.model.text_model, 'save_pretrained')}")
     
     model = model.to(device)
     return model
@@ -776,10 +791,19 @@ def main():
             "rank": args.lora_rank,
             "alpha": args.lora_alpha,
             "dropout": args.lora_dropout,
-            "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"]
+            "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
         }
+        logger.info("Setting up LoRA configuration...")
         model = setup_lora_config(model, lora_config)
         logger.info("LoRA configuration applied")
+        
+        # Additional verification
+        logger.info(f"Model type after LoRA setup: {type(model)}")
+        if hasattr(model, 'model'):
+            logger.info(f"Model.model type: {type(model.model)}")
+            if hasattr(model.model, 'text_model'):
+                logger.info(f"Model.model.text_model type: {type(model.model.text_model)}")
+        logger.info(f"Model has PeftModel attributes: {hasattr(model, 'save_pretrained')}")
     
     # Load datasets
     train_dataset = HiggsAudioDataset(
@@ -872,18 +896,36 @@ def main():
     
     # Save LoRA adapters separately
     if args.use_lora:
+        logger.info("LoRA flag is set, attempting to save LoRA adapters...")
         lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-        if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
-            model.model.text_model.save_pretrained(lora_output_dir)
-        elif hasattr(model, 'model'):
-            model.model.save_pretrained(lora_output_dir)
-        else:
-            model.save_pretrained(lora_output_dir)
-        logger.info(f"LoRA adapters saved separately to {lora_output_dir}")
-        logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
-        logger.info("To merge LoRA adapters with base model, use the merger.py script:")
-        logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
-        logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
+        logger.info(f"LoRA output directory: {lora_output_dir}")
+        
+        # Use trainer.model instead of original model for LoRA saving
+        model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
+        logger.info(f"Model to save type: {type(model_to_save)}")
+        logger.info(f"Model to save has save_pretrained method: {hasattr(model_to_save, 'save_pretrained')}")
+        
+        # Additional debugging info
+        if hasattr(model_to_save, 'model'):
+            logger.info(f"Model to save has model attribute")
+            if hasattr(model_to_save.model, 'text_model'):
+                logger.info(f"Model to save.model has text_model attribute")
+        
+        try:
+            logger.info(f"Creating directory: {lora_output_dir}")
+            os.makedirs(lora_output_dir, exist_ok=True)
+            logger.info(f"Directory creation successful. Directory exists: {os.path.exists(lora_output_dir)}")
+            logger.info(f"Calling save_pretrained on model")
+            model_to_save.save_pretrained(lora_output_dir)
+            logger.info(f"LoRA adapters saved to {lora_output_dir}")
+            logger.info(f"Contents of lora_output_dir after save: {os.listdir(lora_output_dir) if os.path.exists(lora_output_dir) else 'Directory does not exist'}")
+            logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
+            logger.info("To merge LoRA adapters with base model, use the merger.py script:")
+            logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
+            logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
+        except Exception as e:
+            logger.error(f"Failed to save LoRA adapters: {e}")
+            logger.exception("Exception details:")
 
 
 if __name__ == "__main__":
