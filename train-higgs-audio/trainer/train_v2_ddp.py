@@ -621,6 +621,29 @@ class HiggsAudioTrainer(Trainer):
             
         return eval_result
         
+    def _save_checkpoint(self, model, trial, metrics=None):
+        """Custom checkpoint saving for LoRA training"""
+        # Call the parent method first
+        super()._save_checkpoint(model, trial, metrics)
+        
+        # If this is a LoRA model, also save the adapters separately
+        if hasattr(self.args, 'save_only_model') and self.args.save_only_model:
+            # Get the actual model (unwrap from DDP if needed)
+            model_to_save = model.module if hasattr(model, 'module') else model
+            
+            # Get the PEFT model
+            if hasattr(model_to_save, 'model'):
+                peft_model = model_to_save.model
+            else:
+                peft_model = model_to_save
+                
+            # Save the adapters to a separate directory
+            if hasattr(peft_model, 'save_pretrained'):
+                import os
+                lora_output_dir = os.path.join(self.args.output_dir, f"checkpoint-{self.state.global_step}", "lora_adapters")
+                os.makedirs(lora_output_dir, exist_ok=True)
+                peft_model.save_pretrained(lora_output_dir)
+
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     """Setup LoRA configuration for the model following the same pattern as trainer_ddp.py"""
     peft_config = LoraConfig(
@@ -803,6 +826,8 @@ def main():
         # Set to True to solve DDP hanging issues
         ddp_find_unused_parameters=True,
         # --- End ultimate fix ---
+        # LoRA-specific configuration
+        save_only_model=True if args.use_lora else False,
     )
     
     # Define a compute_metrics function that works with our model
