@@ -881,13 +881,39 @@ def main():
     trainer.train()
 
     if trainer.is_world_process_zero():
+        logger.info("Process is world process zero, saving model...")
         trainer.save_model()
         logger.info(f"Model saved to {args.output_dir}")
+        logger.info(f"use_lora flag: {args.use_lora}")
         if args.use_lora:
+            logger.info("LoRA flag is set, attempting to save LoRA adapters...")
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
+            logger.info(f"LoRA output directory: {lora_output_dir}")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            model_to_save.save_pretrained(lora_output_dir)
-            logger.info(f"LoRA adapters saved to {lora_output_dir}")
+            logger.info(f"Model to save type: {type(model_to_save)}")
+            logger.info(f"Model to save has save_pretrained method: {hasattr(model_to_save, 'save_pretrained')}")
+            
+            # Additional debugging info
+            if hasattr(model_to_save, 'model'):
+                logger.info(f"Model to save has model attribute")
+                if hasattr(model_to_save.model, 'text_model'):
+                    logger.info(f"Model to save.model has text_model attribute")
+            
+            try:
+                logger.info(f"Creating directory: {lora_output_dir}")
+                os.makedirs(lora_output_dir, exist_ok=True)
+                logger.info(f"Directory creation successful. Directory exists: {os.path.exists(lora_output_dir)}")
+                logger.info(f"Calling save_pretrained on model")
+                model_to_save.save_pretrained(lora_output_dir)
+                logger.info(f"LoRA adapters saved to {lora_output_dir}")
+                logger.info(f"Contents of lora_output_dir after save: {os.listdir(lora_output_dir) if os.path.exists(lora_output_dir) else 'Directory does not exist'}")
+            except Exception as e:
+                logger.error(f"Failed to save LoRA adapters: {e}")
+                logger.exception("Exception details:")
+        else:
+            logger.info("LoRA flag is not set, skipping LoRA adapter saving")
+    else:
+        logger.info("Process is not world process zero, skipping model saving")
 
 if __name__ == "__main__":
     main()
