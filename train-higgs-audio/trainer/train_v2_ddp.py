@@ -881,22 +881,10 @@ def main():
     trainer.train()
 
     if trainer.is_world_process_zero():
+        trainer.save_model()
+        logger.info(f"Model saved to {args.output_dir}")
         if args.use_lora:
-            # For LoRA training, save only the adapters
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            # Check model structure before calling save_pretrained (following the pattern from trainer.py)
-            if hasattr(model_to_save, 'model') and hasattr(model_to_save.model, 'text_model'):
-                model_to_save.model.text_model.save_pretrained(lora_output_dir)
-            elif hasattr(model_to_save, 'model'):
-                model_to_save.model.save_pretrained(lora_output_dir)
-            else:
-                model_to_save.save_pretrained(lora_output_dir)
+            model_to_save.save_pretrained(lora_output_dir)
             logger.info(f"LoRA adapters saved to {lora_output_dir}")
-        else:
-            # For full fine-tuning, save the full model
-            trainer.save_model()
-            logger.info(f"Model checkpoints saved to {args.output_dir}")
-
-if __name__ == "__main__":
-    main()
