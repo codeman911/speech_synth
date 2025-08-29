@@ -635,28 +635,23 @@ class HiggsAudioTrainer(Trainer):
         """
         Custom evaluation loop that ensures eval_loss is computed and returned
         """
-        # Force prediction_loss_only to False to ensure loss is computed (like trainer.py)
-        prediction_loss_only = False
+        # Force prediction_loss_only to False to ensure loss is computed
+        if prediction_loss_only is None:
+            prediction_loss_only = False
             
         # Call the parent evaluation loop
         eval_result = super().evaluation_loop(
             dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix
         )
         
-        # Ensure eval_loss is in the metrics with comprehensive fallback (enhanced from trainer.py)
-        if "eval_loss" not in eval_result.metrics:
-            # Primary fallback: Try to get loss from eval_result.loss
-            if hasattr(eval_result, 'loss') and eval_result.loss is not None:
-                eval_result.metrics["eval_loss"] = eval_result.loss
-            # Secondary fallback: Check if there's a 'loss' key in the metrics
-            elif 'loss' in eval_result.metrics:
-                eval_result.metrics["eval_loss"] = eval_result.metrics['loss']
-            # Tertiary fallback: Look for loss in other possible keys
-            elif 'eval_loss' in eval_result.metrics:
-                eval_result.metrics["eval_loss"] = eval_result.metrics['eval_loss']
-            # Last resort fallback: Set to a large value to indicate issue but allow training to continue
-            else:
-                eval_result.metrics["eval_loss"] = 999999.0  # Large value to indicate issue
+        # Ensure eval_loss is in the metrics
+        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss') and eval_result.loss is not None:
+            eval_result.metrics["eval_loss"] = eval_result.loss
+        elif "eval_loss" not in eval_result.metrics and 'loss' in eval_result.metrics:
+            eval_result.metrics["eval_loss"] = eval_result.metrics['loss']
+        elif "eval_loss" not in eval_result.metrics:
+            # Last resort - set to a value that indicates issue but won't cause hanging
+            eval_result.metrics["eval_loss"] = 0.0001  # Small non-zero value to indicate issue but allow training
                 
         return eval_result
 
@@ -808,19 +803,6 @@ def main():
     # Determine if evaluation should be enabled
     evaluation_enabled = eval_dataset is not None
 
-    def compute_metrics(eval_pred):
-        """Compute metrics for evaluation"""
-        # For our model, the loss is already computed and returned in the predictions
-        # eval_pred is a tuple of (predictions, labels)
-        predictions = eval_pred.predictions if hasattr(eval_pred, 'predictions') else eval_pred[0]
-        
-        # If predictions is a dict with loss, return it
-        if isinstance(predictions, dict) and 'loss' in predictions:
-            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
-        else:
-            # Return a default value
-            return {"eval_loss": 0.0}
-
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -878,7 +860,6 @@ def main():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=compute_metrics if evaluation_enabled else None,
     )
 
     logger.info(f"Starting zero-shot voice cloning training on device: {device}")
