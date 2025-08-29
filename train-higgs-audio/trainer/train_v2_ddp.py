@@ -607,8 +607,7 @@ class HiggsAudioTrainer(Trainer):
         Custom evaluation loop that ensures eval_loss is computed and returned
         """
         # Force prediction_loss_only to False to ensure loss is computed
-        if prediction_loss_only is None:
-            prediction_loss_only = False
+        prediction_loss_only = False
             
         # Call the parent evaluation loop
         eval_result = super().evaluation_loop(
