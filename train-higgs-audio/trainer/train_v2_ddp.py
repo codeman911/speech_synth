@@ -878,9 +878,32 @@ def main():
         logger.info(f"Model saved to {args.output_dir}")
         if args.use_lora:
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-            model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            model_to_save.save_pretrained(lora_output_dir)
-            logger.info(f"LoRA adapters saved to {lora_output_dir}")
-
+            # Add proper model structure checking before calling save_pretrained
+            # Add error handling with informative logging
+            # Add verification logging to help with debugging
+            try:
+                model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
+                logger.info(f"Model to save type: {type(model_to_save)}")
+                logger.info(f"Model to save has PeftModel attributes: {hasattr(model_to_save, 'save_pretrained')}")
+                
+                # Check model structure before calling save_pretrained (following the pattern from train_v2.py and trainer_ddp.py)
+                if hasattr(model_to_save, 'model') and hasattr(model_to_save.model, 'text_model'):
+                    logger.info("Saving LoRA adapters from model.model.text_model")
+                    model_to_save.model.text_model.save_pretrained(lora_output_dir)
+                elif hasattr(model_to_save, 'model'):
+                    logger.info("Saving LoRA adapters from model.model")
+                    model_to_save.model.save_pretrained(lora_output_dir)
+                else:
+                    logger.info("Saving LoRA adapters from model")
+                    model_to_save.save_pretrained(lora_output_dir)
+                    
+                logger.info(f"LoRA adapters saved to {lora_output_dir}")
+                logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
+                logger.info("To merge LoRA adapters with base model, use the merger.py script:")
+                logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
+                logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
+            except Exception as e:
+                logger.error(f"Failed to save LoRA adapters: {e}")
+                logger.error("Traceback:", exc_info=True)
 if __name__ == "__main__":
     main()

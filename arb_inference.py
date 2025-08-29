@@ -1143,11 +1143,14 @@ class ArabicVoiceCloningInference:
             Loaded model instance
         """
         try:
+            # Convert to absolute path to avoid relative path issues
+            abs_model_path = os.path.abspath(model_path)
+            
             # Check if model_path is a local directory
-            if os.path.exists(model_path) and os.path.isdir(model_path):
-                logger.info(f"Loading model from local path: {model_path}")
+            if os.path.exists(abs_model_path) and os.path.isdir(abs_model_path):
+                logger.info(f"Loading model from local path: {abs_model_path}")
                 return HiggsAudioModel.from_pretrained(
-                    model_path,
+                    abs_model_path,
                     device_map=self._device,
                     torch_dtype=torch.bfloat16,
                 )
