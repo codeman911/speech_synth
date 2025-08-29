@@ -874,12 +874,10 @@ def main():
     trainer.train()
 
     if trainer.is_world_process_zero():
-        trainer.save_model()
-        logger.info(f"Model saved to {args.output_dir}")
         if args.use_lora:
-            lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-            # Simplified LoRA saving approach that matches trainer_ddp.py
+            # For LoRA training, save only the adapters
             logger.info("LoRA flag is set, attempting to save LoRA adapters...")
+            lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
             logger.info(f"LoRA output directory: {lora_output_dir}")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
             logger.info(f"Model to save type: {type(model_to_save)}")
@@ -896,6 +894,7 @@ def main():
             except Exception as e:
                 logger.error(f"Failed to save LoRA adapters: {e}")
                 logger.error("Traceback:", exc_info=True)
-
-if __name__ == "__main__":
-    main()
+        else:
+            # For full fine-tuning, save the full model
+            trainer.save_model()
+            logger.info(f"Model checkpoints saved to {args.output_dir}")
