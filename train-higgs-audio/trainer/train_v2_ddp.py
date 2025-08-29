@@ -623,8 +623,13 @@ class HiggsAudioTrainer(Trainer):
         
     def _save_checkpoint(self, model, trial, metrics=None):
         """Custom checkpoint saving for LoRA training"""
-        # Call the parent method first
-        super()._save_checkpoint(model, trial, metrics)
+        # Call the parent method with the correct arguments
+        try:
+            # Try calling with metrics parameter first
+            super()._save_checkpoint(model, trial, metrics)
+        except TypeError:
+            # If that fails, call without metrics
+            super()._save_checkpoint(model, trial)
         
         # If this is a LoRA model, also save the adapters separately
         if hasattr(self.args, 'save_only_model') and self.args.save_only_model:

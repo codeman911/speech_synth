@@ -264,3 +264,15 @@ python trainer/find_lora_adapters.py --path /path/to/your/training/output
 ```
 
 This will search for valid LoRA adapters directories and show you their locations.
+
+## Recent Fixes
+
+### Checkpoint Saving Fix
+
+A recent fix was implemented to resolve an issue with checkpoint saving during training:
+
+- **Problem**: `TypeError: Trainer._save_checkpoint() takes 3 positional arguments but 4 were given`
+- **Solution**: Updated the custom `_save_checkpoint` method in `train_v2_ddp.py` to properly handle different method signatures using a try-except approach
+- **Impact**: Training with checkpoint saving now works correctly, including LoRA adapter saving during checkpoints
+
+For more details about this fix, see [CHECKPOINT_FIX_SUMMARY.md](CHECKPOINT_FIX_SUMMARY.md).
