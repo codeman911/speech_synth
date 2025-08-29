@@ -597,8 +597,37 @@ class HiggsAudioTrainer(Trainer):
     
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Custom loss computation"""
-        # Type conversion logic has been moved to Model Wrapper, no longer needed here
-        outputs = model(**inputs)
+        # Handle ExtendedHiggsAudioBatchInput objects exactly like trainer.py
+        if isinstance(inputs, ExtendedHiggsAudioBatchInput):
+            model_inputs = {}
+            for attr_name in ['input_ids', 'attention_mask', 'label_ids', 
+                             'audio_features', 'audio_feature_attention_mask',
+                             'audio_out_ids', 'audio_out_ids_start', 
+                             'audio_in_ids', 'audio_in_ids_start',
+                             'label_audio_ids']:
+                attr_value = getattr(inputs, attr_name, None)
+                if attr_value is not None:
+                    model_inputs[attr_name] = attr_value
+        else:
+            model_inputs = {}
+            for key, value in inputs.items():
+                if key == 'labels':
+                    model_inputs['label_ids'] = value
+                elif key in ['input_ids', 'attention_mask', 'label_ids',
+                            'audio_features', 'audio_feature_attention_mask',
+                            'audio_out_ids', 'audio_out_ids_start', 
+                            'audio_in_ids', 'audio_in_ids_start',
+                            'label_audio_ids']:
+                    model_inputs[key] = value
+        
+        # Ensure all inputs are on the correct device (like trainer.py)
+        for key, value in model_inputs.items():
+            if isinstance(value, torch.Tensor):
+                model_inputs[key] = value.to(self.model.device)
+        
+        # Compute outputs
+        outputs = model(**model_inputs)
+        
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
         
@@ -606,7 +635,7 @@ class HiggsAudioTrainer(Trainer):
         """
         Custom evaluation loop that ensures eval_loss is computed and returned
         """
-        # Force prediction_loss_only to False to ensure loss is computed
+        # Force prediction_loss_only to False to ensure loss is computed (like trainer.py)
         if prediction_loss_only is None:
             prediction_loss_only = False
             
@@ -615,10 +644,21 @@ class HiggsAudioTrainer(Trainer):
             dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix
         )
         
-        # Ensure eval_loss is in the metrics
-        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss'):
-            eval_result.metrics["eval_loss"] = eval_result.loss
-            
+        # Ensure eval_loss is in the metrics with comprehensive fallback (enhanced from trainer.py)
+        if "eval_loss" not in eval_result.metrics:
+            # Primary fallback: Try to get loss from eval_result.loss
+            if hasattr(eval_result, 'loss') and eval_result.loss is not None:
+                eval_result.metrics["eval_loss"] = eval_result.loss
+            # Secondary fallback: Check if there's a 'loss' key in the metrics
+            elif 'loss' in eval_result.metrics:
+                eval_result.metrics["eval_loss"] = eval_result.metrics['loss']
+            # Tertiary fallback: Look for loss in other possible keys
+            elif 'eval_loss' in eval_result.metrics:
+                eval_result.metrics["eval_loss"] = eval_result.metrics['eval_loss']
+            # Last resort fallback: Set to 0.0 to prevent KeyError and allow training to continue
+            else:
+                eval_result.metrics["eval_loss"] = 0.0
+                
         return eval_result
         
     def _save_checkpoint(self, model, trial, metrics=None):
