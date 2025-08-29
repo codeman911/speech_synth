@@ -56,7 +56,7 @@ except ImportError:
                 setattr(self, key, value)
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Add constants
@@ -597,98 +597,11 @@ class HiggsAudioTrainer(Trainer):
     
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Custom loss computation"""
-        # Handle ExtendedHiggsAudioBatchInput objects exactly like trainer.py
-        if isinstance(inputs, ExtendedHiggsAudioBatchInput):
-            model_inputs = {}
-            for attr_name in ['input_ids', 'attention_mask', 'label_ids', 
-                             'audio_features', 'audio_feature_attention_mask',
-                             'audio_out_ids', 'audio_out_ids_start', 
-                             'audio_in_ids', 'audio_in_ids_start',
-                             'label_audio_ids']:
-                attr_value = getattr(inputs, attr_name, None)
-                if attr_value is not None:
-                    model_inputs[attr_name] = attr_value
-        else:
-            model_inputs = {}
-            for key, value in inputs.items():
-                if key == 'labels':
-                    model_inputs['label_ids'] = value
-                elif key in ['input_ids', 'attention_mask', 'label_ids',
-                            'audio_features', 'audio_feature_attention_mask',
-                            'audio_out_ids', 'audio_out_ids_start', 
-                            'audio_in_ids', 'audio_in_ids_start',
-                            'label_audio_ids']:
-                    model_inputs[key] = value
-        
-        # Ensure all inputs are on the correct device (like trainer.py)
-        for key, value in model_inputs.items():
-            if isinstance(value, torch.Tensor):
-                model_inputs[key] = value.to(self.model.device)
-        
-        # Compute outputs
-        outputs = model(**model_inputs)
-        
+        # Type conversion logic has been moved to Model Wrapper, no longer needed here
+        outputs = model(**inputs)
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
         
-    def evaluation_loop(self, dataloader, description, prediction_loss_only=None, ignore_keys=None, metric_key_prefix="eval"):
-        """
-        Custom evaluation loop that ensures eval_loss is computed and returned
-        """
-        # Force prediction_loss_only to False to ensure loss is computed (like trainer.py)
-        if prediction_loss_only is None:
-            prediction_loss_only = False
-            
-        # Call the parent evaluation loop
-        eval_result = super().evaluation_loop(
-            dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix
-        )
-        
-        # Ensure eval_loss is in the metrics with comprehensive fallback (enhanced from trainer.py)
-        if "eval_loss" not in eval_result.metrics:
-            # Primary fallback: Try to get loss from eval_result.loss
-            if hasattr(eval_result, 'loss') and eval_result.loss is not None:
-                eval_result.metrics["eval_loss"] = eval_result.loss
-            # Secondary fallback: Check if there's a 'loss' key in the metrics
-            elif 'loss' in eval_result.metrics:
-                eval_result.metrics["eval_loss"] = eval_result.metrics['loss']
-            # Tertiary fallback: Look for loss in other possible keys
-            elif 'eval_loss' in eval_result.metrics:
-                eval_result.metrics["eval_loss"] = eval_result.metrics['eval_loss']
-            # Last resort fallback: Set to 0.0 to prevent KeyError and allow training to continue
-            else:
-                eval_result.metrics["eval_loss"] = 0.0
-                
-        return eval_result
-        
-    def _save_checkpoint(self, model, trial, metrics=None):
-        """Custom checkpoint saving for LoRA training"""
-        # Call the parent method with the correct arguments
-        try:
-            # Try calling with metrics parameter first
-            super()._save_checkpoint(model, trial, metrics)
-        except TypeError:
-            # If that fails, call without metrics
-            super()._save_checkpoint(model, trial)
-        
-        # If this is a LoRA model, also save the adapters separately
-        if hasattr(self.args, 'save_only_model') and self.args.save_only_model:
-            # Get the actual model (unwrap from DDP if needed)
-            model_to_save = model.module if hasattr(model, 'module') else model
-            
-            # Get the PEFT model
-            if hasattr(model_to_save, 'model'):
-                peft_model = model_to_save.model
-            else:
-                peft_model = model_to_save
-                
-            # Save the adapters to a separate directory
-            if hasattr(peft_model, 'save_pretrained'):
-                import os
-                lora_output_dir = os.path.join(self.args.output_dir, f"checkpoint-{self.state.global_step}", "lora_adapters")
-                os.makedirs(lora_output_dir, exist_ok=True)
-                peft_model.save_pretrained(lora_output_dir)
-
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     """Setup LoRA configuration for the model following the same pattern as trainer_ddp.py"""
     peft_config = LoraConfig(
@@ -741,19 +654,17 @@ def main():
                        help="Number of warmup steps")
     parser.add_argument("--logging_steps", type=int, default=10,
                        help="Log every X updates steps")
-    parser.add_argument("--save_steps", type=int, default=7000,
+    parser.add_argument("--save_steps", type=int, default=5000,
                        help="Save checkpoint every X updates steps")
     parser.add_argument("--eval_steps", type=int, default=5000,
                        help="Evaluate every X updates steps")
-    parser.add_argument("--disable_evaluation", action="store_true", default=False,
-                       help="Disable evaluation during training to avoid checkpoint/evaluation mismatch")
     
     # LoRA arguments
     parser.add_argument("--use_lora", action="store_true", default=False,
                        help="Enable LoRA training")
-    parser.add_argument("--lora_rank", type=int, default=16,
+    parser.add_argument("--lora_rank", type=int, default=32,
                        help="LoRA rank parameter")
-    parser.add_argument("--lora_alpha", type=int, default=32,
+    parser.add_argument("--lora_alpha", type=int, default=64,
                        help="LoRA alpha parameter")
     parser.add_argument("--lora_dropout", type=float, default=0.1,
                        help="LoRA dropout rate")
@@ -807,15 +718,7 @@ def main():
         lora_config = {"rank": args.lora_rank, "alpha": args.lora_alpha, "dropout": args.lora_dropout}
         model = setup_lora_config(model, lora_config)
         logger.info("LoRA configuration applied")
-        # Add logging to verify LoRA model
-        logger.info(f"Model type after LoRA setup: {type(model)}")
-        if hasattr(model, 'model'):
-            logger.info(f"Model.model type: {type(model.model)}")
-            if hasattr(model.model, 'text_model'):
-                logger.info(f"Model.model.text_model type: {type(model.model.text_model)}")
-        logger.info(f"Model has save_pretrained attribute: {hasattr(model, 'save_pretrained')}")
-        if hasattr(model, 'model'):
-            logger.info(f"Model.model has save_pretrained attribute: {hasattr(model.model, 'save_pretrained')}")
+
     # Load training dataset
     full_train_dataset = ZeroShotVoiceCloningDataset(args.train_data_file, tokenizer, audio_tokenizer)
     
@@ -844,9 +747,6 @@ def main():
         eval_dataset = None
         logger.info(f"Using all data for training: {len(train_dataset)} samples")
 
-    # Determine if evaluation should be enabled
-    evaluation_enabled = eval_dataset is not None and not args.disable_evaluation
-
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -856,29 +756,28 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        evaluation_strategy="steps" if evaluation_enabled else "no",
-        eval_steps=args.eval_steps if evaluation_enabled else None,
+        evaluation_strategy="steps" if eval_dataset else "no",
+        eval_steps=args.eval_steps if eval_dataset else None,
         save_total_limit=3,
-        load_best_model_at_end=evaluation_enabled,  # Only True when evaluation is enabled
-        metric_for_best_model="eval_loss" if evaluation_enabled else None,
+        load_best_model_at_end=True if eval_dataset else False,
+        metric_for_best_model="eval_loss" if eval_dataset else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
         remove_unused_columns=False,
         report_to=args.report_to,
         logging_dir=args.logging_dir,
-        # Set to False to avoid DDP hanging issues
-        ddp_find_unused_parameters=False,
-        # LoRA-specific configuration
-        save_only_model=True if args.use_lora else False,
+        # --- Start ultimate fix ---
+        # Set to True to solve DDP hanging issues
+        ddp_find_unused_parameters=True,
+        # --- End ultimate fix ---
     )
-    
-    # Setup data collator configured to match inference script exactly
+
+    data_collator = None
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
         try:
             from transformers import WhisperProcessor
             whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
-            
             data_collator = ExtendedHiggsAudioSampleCollator(
                 whisper_processor=whisper_processor,
                 audio_in_token_id=model.config.audio_in_token_idx,
@@ -894,12 +793,10 @@ def main():
             )
         except Exception as e:
             logger.warning(f"Failed to setup Higgs collator: {e}. Using fallback.")
-            data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
-    else:
+    if data_collator is None:
         data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
         logger.warning("Using fallback collator")
-    
-    # Initialize trainer
+        
     trainer = HiggsAudioTrainer(
         model=model,
         args=training_args,
@@ -913,37 +810,13 @@ def main():
     trainer.train()
 
     if trainer.is_world_process_zero():
+        trainer.save_model()
+        logger.info(f"Model saved to {args.output_dir}")
         if args.use_lora:
-            # For LoRA training, save only the adapters
-            logger.info("LoRA flag is set, attempting to save LoRA adapters...")
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-            logger.info(f"LoRA output directory: {lora_output_dir}")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            logger.info(f"Model to save type: {type(model_to_save)}")
-            
-            # Get the actual PEFT model for saving
-            if hasattr(model_to_save, 'model'):
-                peft_model = model_to_save.model
-                logger.info(f"PEFT model type: {type(peft_model)}")
-            else:
-                peft_model = model_to_save
-                logger.info("Using model directly as PEFT model")
-            
-            try:
-                peft_model.save_pretrained(lora_output_dir)
-                logger.info(f"LoRA adapters saved separately to {lora_output_dir}")
-                logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
-                logger.info("To merge LoRA adapters with base model, use the merger.py script:")
-                logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
-                logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
-            except Exception as e:
-                logger.error(f"Failed to save LoRA adapters: {e}")
-                logger.error("Traceback:", exc_info=True)
-        else:
-            # For full fine-tuning, save the full model
-            trainer.save_model()
-            logger.info(f"Model checkpoints saved to {args.output_dir}")
-
+            model_to_save.save_pretrained(lora_output_dir)
+            logger.info(f"LoRA adapters saved to {lora_output_dir}")
 
 if __name__ == "__main__":
     main()
