@@ -597,37 +597,8 @@ class HiggsAudioTrainer(Trainer):
     
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Custom loss computation"""
-        # Handle ExtendedHiggsAudioBatchInput objects exactly like trainer.py
-        if isinstance(inputs, ExtendedHiggsAudioBatchInput):
-            model_inputs = {}
-            for attr_name in ['input_ids', 'attention_mask', 'label_ids', 
-                             'audio_features', 'audio_feature_attention_mask',
-                             'audio_out_ids', 'audio_out_ids_start', 
-                             'audio_in_ids', 'audio_in_ids_start',
-                             'label_audio_ids']:
-                attr_value = getattr(inputs, attr_name, None)
-                if attr_value is not None:
-                    model_inputs[attr_name] = attr_value
-        else:
-            model_inputs = {}
-            for key, value in inputs.items():
-                if key == 'labels':
-                    model_inputs['label_ids'] = value
-                elif key in ['input_ids', 'attention_mask', 'label_ids',
-                            'audio_features', 'audio_feature_attention_mask',
-                            'audio_out_ids', 'audio_out_ids_start', 
-                            'audio_in_ids', 'audio_in_ids_start',
-                            'label_audio_ids']:
-                    model_inputs[key] = value
-        
-        # Ensure all inputs are on the correct device (like trainer.py)
-        for key, value in model_inputs.items():
-            if isinstance(value, torch.Tensor):
-                model_inputs[key] = value.to(self.model.device)
-        
-        # Compute outputs
-        outputs = model(**model_inputs)
-        
+        # Type conversion logic has been moved to Model Wrapper, no longer needed here
+        outputs = model(**inputs)
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
         
@@ -645,16 +616,11 @@ class HiggsAudioTrainer(Trainer):
         )
         
         # Ensure eval_loss is in the metrics
-        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss') and eval_result.loss is not None:
+        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss'):
             eval_result.metrics["eval_loss"] = eval_result.loss
-        elif "eval_loss" not in eval_result.metrics and 'loss' in eval_result.metrics:
-            eval_result.metrics["eval_loss"] = eval_result.metrics['loss']
-        elif "eval_loss" not in eval_result.metrics:
-            # Last resort - set to a value that indicates issue but won't cause hanging
-            eval_result.metrics["eval_loss"] = 0.0001  # Small non-zero value to indicate issue but allow training
-                
+            
         return eval_result
-
+        
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     """Setup LoRA configuration for the model following the same pattern as trainer_ddp.py"""
     peft_config = LoraConfig(
@@ -707,19 +673,17 @@ def main():
                        help="Number of warmup steps")
     parser.add_argument("--logging_steps", type=int, default=10,
                        help="Log every X updates steps")
-    parser.add_argument("--save_steps", type=int, default=5000,
+    parser.add_argument("--save_steps", type=int, default=7000,
                        help="Save checkpoint every X updates steps")
     parser.add_argument("--eval_steps", type=int, default=5000,
                        help="Evaluate every X updates steps")
-    parser.add_argument("--disable_evaluation", action="store_true", default=False,
-                       help="Disable evaluation during training to avoid checkpoint/evaluation mismatch")
     
     # LoRA arguments
     parser.add_argument("--use_lora", action="store_true", default=False,
                        help="Enable LoRA training")
-    parser.add_argument("--lora_rank", type=int, default=32,
+    parser.add_argument("--lora_rank", type=int, default=16,
                        help="LoRA rank parameter")
-    parser.add_argument("--lora_alpha", type=int, default=64,
+    parser.add_argument("--lora_alpha", type=int, default=32,
                        help="LoRA alpha parameter")
     parser.add_argument("--lora_dropout", type=float, default=0.1,
                        help="LoRA dropout rate")
@@ -773,13 +737,6 @@ def main():
         lora_config = {"rank": args.lora_rank, "alpha": args.lora_alpha, "dropout": args.lora_dropout}
         model = setup_lora_config(model, lora_config)
         logger.info("LoRA configuration applied")
-        # Add logging to verify LoRA model
-        logger.info(f"Model type after LoRA setup: {type(model)}")
-        if hasattr(model, 'model'):
-            logger.info(f"Model.model type: {type(model.model)}")
-            if hasattr(model.model, 'text_model'):
-                logger.info(f"Model.model.text_model type: {type(model.model.text_model)}")
-        logger.info(f"Model has PeftModel attributes: {hasattr(model, 'save_pretrained')}")
 
     # Load training dataset
     full_train_dataset = ZeroShotVoiceCloningDataset(args.train_data_file, tokenizer, audio_tokenizer)
@@ -809,15 +766,6 @@ def main():
         eval_dataset = None
         logger.info(f"Using all data for training: {len(train_dataset)} samples")
 
-    # Determine if evaluation should be enabled
-    evaluation_enabled = eval_dataset is not None and not args.disable_evaluation
-    if args.disable_evaluation:
-        logger.info("Evaluation is disabled by user command line argument")
-    elif eval_dataset is None:
-        logger.info("No evaluation dataset provided, evaluation will be disabled")
-    else:
-        logger.info("Evaluation is enabled")
-
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -827,11 +775,11 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        evaluation_strategy="steps" if evaluation_enabled else "no",
-        eval_steps=args.eval_steps if evaluation_enabled else None,
+        evaluation_strategy="steps" if eval_dataset else "no",
+        eval_steps=args.eval_steps if eval_dataset else None,
         save_total_limit=3,
-        load_best_model_at_end=False,  # Always False to avoid checkpoint/evaluation mismatch
-        metric_for_best_model=None,    # Always None to avoid checkpoint/evaluation mismatch
+        load_best_model_at_end=True if eval_dataset else False,
+        metric_for_best_model="eval_loss" if eval_dataset else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
@@ -843,12 +791,27 @@ def main():
         ddp_find_unused_parameters=True,
         # --- End ultimate fix ---
     )
-
-    data_collator = None
+    
+    # Define a compute_metrics function that works with our model
+    def compute_metrics(eval_pred):
+        """Compute metrics for evaluation"""
+        # For our model, the loss is already computed and returned in the predictions
+        # eval_pred is a tuple of (predictions, labels)
+        predictions = eval_pred.predictions if hasattr(eval_pred, 'predictions') else eval_pred[0]
+        
+        # If predictions is a dict with loss, return it
+        if isinstance(predictions, dict) and 'loss' in predictions:
+            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
+        else:
+            # Return a default value
+            return {"eval_loss": 0.0}
+    
+    # Setup data collator configured to match inference script exactly
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
         try:
             from transformers import WhisperProcessor
             whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
+            
             data_collator = ExtendedHiggsAudioSampleCollator(
                 whisper_processor=whisper_processor,
                 audio_in_token_id=model.config.audio_in_token_idx,
@@ -864,10 +827,12 @@ def main():
             )
         except Exception as e:
             logger.warning(f"Failed to setup Higgs collator: {e}. Using fallback.")
-    if data_collator is None:
+            data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
+    else:
         data_collator = ExtendedHiggsAudioSampleCollator(pad_token_id=tokenizer.pad_token_id)
         logger.warning("Using fallback collator")
-        
+    
+    # Initialize trainer
     trainer = HiggsAudioTrainer(
         model=model,
         args=training_args,
@@ -881,39 +846,13 @@ def main():
     trainer.train()
 
     if trainer.is_world_process_zero():
-        logger.info("Process is world process zero, saving model...")
         trainer.save_model()
         logger.info(f"Model saved to {args.output_dir}")
-        logger.info(f"use_lora flag: {args.use_lora}")
         if args.use_lora:
-            logger.info("LoRA flag is set, attempting to save LoRA adapters...")
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-            logger.info(f"LoRA output directory: {lora_output_dir}")
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            logger.info(f"Model to save type: {type(model_to_save)}")
-            logger.info(f"Model to save has save_pretrained method: {hasattr(model_to_save, 'save_pretrained')}")
-            
-            # Additional debugging info
-            if hasattr(model_to_save, 'model'):
-                logger.info(f"Model to save has model attribute")
-                if hasattr(model_to_save.model, 'text_model'):
-                    logger.info(f"Model to save.model has text_model attribute")
-            
-            try:
-                logger.info(f"Creating directory: {lora_output_dir}")
-                os.makedirs(lora_output_dir, exist_ok=True)
-                logger.info(f"Directory creation successful. Directory exists: {os.path.exists(lora_output_dir)}")
-                logger.info(f"Calling save_pretrained on model")
-                model_to_save.save_pretrained(lora_output_dir)
-                logger.info(f"LoRA adapters saved to {lora_output_dir}")
-                logger.info(f"Contents of lora_output_dir after save: {os.listdir(lora_output_dir) if os.path.exists(lora_output_dir) else 'Directory does not exist'}")
-            except Exception as e:
-                logger.error(f"Failed to save LoRA adapters: {e}")
-                logger.exception("Exception details:")
-        else:
-            logger.info("LoRA flag is not set, skipping LoRA adapter saving")
-    else:
-        logger.info("Process is not world process zero, skipping model saving")
+            model_to_save.save_pretrained(lora_output_dir)
+            logger.info(f"LoRA adapters saved to {lora_output_dir}")
 
 if __name__ == "__main__":
     main()

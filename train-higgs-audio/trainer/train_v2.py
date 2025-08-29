@@ -711,15 +711,8 @@ class HiggsAudioTrainer(Trainer):
         )
         
         # Ensure eval_loss is in the metrics
-        if "eval_loss" not in eval_result.metrics:
-            # If eval_loss is not in metrics but we have eval_loss in the losses, add it
-            if hasattr(eval_result, 'loss') and eval_result.loss is not None:
-                eval_result.metrics["eval_loss"] = eval_result.loss
-            # If we still don't have eval_loss, set it to 0.0 to avoid KeyError
-            elif "loss" in eval_result.metrics:
-                eval_result.metrics["eval_loss"] = eval_result.metrics["loss"]
-            else:
-                eval_result.metrics["eval_loss"] = 0.0
+        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss'):
+            eval_result.metrics["eval_loss"] = eval_result.loss
             
         return eval_result
 
@@ -790,8 +783,6 @@ def main():
                        help="Save checkpoint every X updates steps")
     parser.add_argument("--eval_steps", type=int, default=500,
                        help="Evaluate every X updates steps")
-    parser.add_argument("--disable_evaluation", action="store_true", default=False,
-                       help="Disable evaluation during training to avoid checkpoint/evaluation mismatch")
     
     # LoRA arguments
     parser.add_argument("--use_lora", action="store_true", default=False,
@@ -895,9 +886,6 @@ def main():
         eval_dataset = None
         logger.info(f"Using all data for training: {len(train_dataset)} samples")
     
-    # Determine if evaluation should be enabled
-    evaluation_enabled = eval_dataset is not None and not args.disable_evaluation
-    
     # Setup training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -908,20 +896,20 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        eval_steps=args.eval_steps if evaluation_enabled else None,
-        evaluation_strategy="steps" if evaluation_enabled else "no",
+        eval_steps=args.eval_steps,
+        evaluation_strategy="steps" if eval_dataset else "no",
         save_total_limit=3,
-        load_best_model_at_end=evaluation_enabled,  # Only True when evaluation is enabled
-        metric_for_best_model="eval_loss" if evaluation_enabled else None,
+        load_best_model_at_end=True if eval_dataset else False,
+        metric_for_best_model="eval_loss" if eval_dataset else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
         remove_unused_columns=False,
         report_to=args.report_to if args.report_to != "none" else None,
         logging_dir=args.logging_dir,
-        ddp_find_unused_parameters=False,  # Changed from True to False to avoid DDP hanging issues
+        ddp_find_unused_parameters=True,  # For DDD compatibility
     )
-
+    
     # Setup data collator configured to match inference script exactly
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
         try:
@@ -976,10 +964,6 @@ def main():
         else:
             model.save_pretrained(lora_output_dir)
         logger.info(f"LoRA adapters saved to {lora_output_dir}")
-        logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
-        logger.info("To merge LoRA adapters with base model, use the merger.py script:")
-        logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
-        logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ This document describes the new training pipeline for Higgs Audio v2 that is spe
 
 ## Architecture
 
-```
+```mermaid
 graph TD
     A[ChatML Dataset] --> B[ZeroShotVoiceCloningDataset]
     B --> C[HiggsAudioTrainer]
@@ -35,14 +35,12 @@ graph TD
 - `train_v2.py`: Single GPU training script
 - `train_v2_ddp.py`: Multi-GPU training script with DDP support
 - `chatml_zero_shot_example.json`: Sample ChatML dataset format
-- `merger.py`: Script to merge LoRA adapters with base model
-- `find_lora_adapters.py`: Helper script to locate LoRA adapters directories
 
 ## Dataset Format
 
 The training pipeline expects datasets in ChatML JSON format with the following structure:
 
-```
+```json
 {
   "messages": [
     {
@@ -207,82 +205,3 @@ The training loop follows standard Hugging Face Trainer patterns with customizat
 2. **Zero-Shot Capability**: Trained model will support zero-shot voice cloning as intended
 3. **Performance**: Efficient training with LoRA and mixed precision support
 4. **Compatibility**: Works with existing Higgs Audio model checkpoints and tokenizers
-
-## Enhanced Debugging for LoRA Adapter Saving
-
-To help debug issues with LoRA adapter saving, enhanced logging has been added to both training scripts:
-
-1. **Detailed logging during LoRA setup**: After applying LoRA configuration, the scripts now log detailed information about the model structure
-2. **Detailed logging during LoRA saving**: Before and during the saving process, the scripts log information about the model being saved and any errors that occur
-
-If you're experiencing issues with LoRA adapters not being saved, check the logs for:
-- "LoRA flag is set, attempting to save LoRA adapters..."
-- "Model to save type: ..."
-- Any error messages that might indicate why saving is failing
-
-These enhanced logs will help identify whether the issue is with:
-- The LoRA configuration not being applied correctly
-- The model not being properly converted to a LoRA model
-- Issues during the saving process
-
-## LoRA Adapters and Model Merging
-
-When training with LoRA enabled (`--use_lora`), the training scripts now save LoRA adapters separately from model checkpoints:
-
-### Directory Structure
-```
-output/
-├── checkpoint-100/           # Model checkpoint (full model when not using LoRA, not created when using LoRA)
-├── checkpoint-200/           # Model checkpoint (full model when not using LoRA, not created when using LoRA)
-├── lora_adapters/            # LoRA adapters (created only when using --use_lora)
-│   ├── adapter_config.json
-│   ├── adapter_model.bin
-│   └── README.md
-└── trainer_state.json
-```
-
-### Important Notes
-1. **When using `--use_lora`**: Only LoRA adapters are saved in the `lora_adapters` directory, no full model checkpoints are created
-2. **When not using `--use_lora`**: Full model checkpoints are saved in checkpoint directories
-3. **To merge LoRA adapters with the base model, use the `lora_adapters` directory**
-
-### Merging LoRA Adapters
-To merge LoRA adapters with the base model, use the `merger.py` script:
-
-```bash
-python trainer/merger.py \
-    --base_model_path bosonai/higgs-audio-v2-generation-3B-base \
-    --lora_adapter_path ./output/lora_adapters \
-    --output_path ./merged_model
-```
-
-### Finding LoRA Adapters
-If you're unsure where your LoRA adapters are located, use the helper script:
-
-```bash
-python trainer/find_lora_adapters.py --path /path/to/your/training/output
-```
-
-This will search for valid LoRA adapters directories and show you their locations.
-
-## Recent Fixes
-
-### Checkpoint Saving Fix
-
-A recent fix was implemented to resolve an issue with checkpoint saving during training:
-
-- **Problem**: `TypeError: Trainer._save_checkpoint() takes 3 positional arguments but 4 were given`
-- **Solution**: Updated the custom `_save_checkpoint` method in `train_v2_ddp.py` to properly handle different method signatures using a try-except approach
-- **Impact**: Training with checkpoint saving now works correctly, including LoRA adapter saving during checkpoints
-
-For more details about this fix, see [CHECKPOINT_FIX_SUMMARY.md](CHECKPOINT_FIX_SUMMARY.md).
-
-### Evaluation/Checkpoint Mismatch Fix
-
-A fix was implemented to resolve an issue with evaluation/checkpoint mismatch:
-
-- **Problem**: `ValueError: --load_best_model_at_end requires the saving steps to be a round multiple of the evaluation steps`
-- **Solution**: Added a `--disable_evaluation` flag to all training scripts to allow users to explicitly disable evaluation when needed
-- **Impact**: Users can now run training with any combination of `save_steps` and `eval_steps` by disabling evaluation when needed
-
-For more details about this fix, see [EVALUATION_FIX_SUMMARY.md](EVALUATION_FIX_SUMMARY.md).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Higgs Audio v2 Training Script with LoRA Support
+Higgs Audio v2 Training Script with LoRA Support and Task-specific Training
 Based on the Higgs Audio v2 architecture from Boson AI
 """
 
@@ -12,14 +12,14 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from transformers import (
-    AutoTokenizer,
+    AutoTokenizer, 
     AutoConfig,
-    TrainingArguments,
+    TrainingArguments, 
     Trainer,
 )
 from peft import (
-    LoraConfig,
-    get_peft_model,
+    LoraConfig, 
+    get_peft_model, 
     TaskType,
     PeftModel
 )
@@ -41,12 +41,22 @@ try:
 except ImportError:
     HIGGS_AVAILABLE = False
     logging.warning("Higgs Audio modules not available. Using fallback implementation.")
-
-    # A simple fallback class is sufficient. It does NOT need a .to() method.
+    
+    # 添加fallback类定义
     class ChatMLDatasetSample:
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
                 setattr(self, key, value)
+        
+        def to(self, device):
+            """将所有tensor属性转移到指定设备"""
+            new_sample = ChatMLDatasetSample()
+            for key, value in self.__dict__.items():
+                if isinstance(value, torch.Tensor):
+                    setattr(new_sample, key, value.to(device))
+                else:
+                    setattr(new_sample, key, value)
+            return new_sample
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -64,25 +74,26 @@ class ExtendedHiggsAudioBatchInput:
     """
     Extended HiggsAudioBatchInput with __len__ method for Trainer compatibility
     """
+    
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
-
+    
     def __len__(self):
         """Return the batch size based on input_ids"""
         if hasattr(self, 'input_ids') and self.input_ids is not None:
             return self.input_ids.shape[0]
         else:
             return 0
-
+    
     def __getitem__(self, key):
         """Allow dictionary-style access for compatibility"""
         return getattr(self, key)
-
+    
     def __contains__(self, key):
         """Check if attribute exists"""
         return hasattr(self, key)
-
+    
     def keys(self):
         """Return all attribute names for compatibility"""
         return [attr for attr in dir(self) if not attr.startswith('_') and not callable(getattr(self, attr))]
@@ -92,18 +103,23 @@ class ExtendedHiggsAudioSampleCollator:
     """
     Extended collator that returns our custom batch input class
     """
+    
     def __init__(self, **kwargs):
         if HIGGS_AVAILABLE:
-            # Assuming HiggsAudioSampleCollator can be initialized with these kwargs
             self.base_collator = HiggsAudioSampleCollator(**kwargs)
         else:
             # Fallback collator
             self.pad_token_id = kwargs.get('pad_token_id', 0)
-
+    
     def __call__(self, batch: List[ChatMLDatasetSample]):
         if HIGGS_AVAILABLE and hasattr(self, 'base_collator'):
+            # 1. 调用官方的、底层的 collator，让它完成所有复杂的填充和对齐工作
             batch_input = self.base_collator(batch)
+            
+            # batch_input.audio_out_ids 是经过填充和处理的，其长度与模型输出的 audio_logits 长度完全一致。
             label_audio_ids = batch_input.audio_out_ids
+            
+            # 2. 转换为我们的扩展类，并传入这个完美的标签
             extended_batch = ExtendedHiggsAudioBatchInput(
                 input_ids=batch_input.input_ids,
                 attention_mask=batch_input.attention_mask,
@@ -115,61 +131,111 @@ class ExtendedHiggsAudioSampleCollator:
                 audio_in_ids=batch_input.audio_in_ids,
                 audio_in_ids_start=batch_input.audio_in_ids_start,
                 label_ids=batch_input.label_ids,
-                label_audio_ids=label_audio_ids,
+                label_audio_ids=label_audio_ids, # <-- 使用我们新定义的、对齐的标签
                 reward=batch_input.reward,
             )
+            
             return extended_batch
         else:
             # Fallback implementation
-            input_ids_list, attention_mask_list, label_ids_list = [], [], []
+            input_ids_list = []
+            attention_mask_list = []
+            label_ids_list = []
+            
             for sample in batch:
                 input_ids_list.append(sample.input_ids)
-                attention_mask_list.append(torch.ones_like(sample.input_ids))
-                label_ids_list.append(getattr(sample, 'label_ids', sample.input_ids))
-
+                attention_mask = torch.ones_like(sample.input_ids)
+                attention_mask_list.append(attention_mask)
+                
+                if hasattr(sample, 'label_ids'):
+                    label_ids_list.append(sample.label_ids)
+                else:
+                    label_ids_list.append(sample.input_ids)
+            
+            # Pad sequences
             max_len = max(len(ids) for ids in input_ids_list)
-            padded_input_ids, padded_attention_mask, padded_label_ids = [], [], []
-
+            
+            padded_input_ids = []
+            padded_attention_mask = []
+            padded_label_ids = []
+            
             for i in range(len(input_ids_list)):
-                pad_len = max_len - len(input_ids_list[i])
-                padded_input_ids.append(torch.cat([input_ids_list[i], torch.full((pad_len,), self.pad_token_id, dtype=torch.long)]))
-                padded_attention_mask.append(torch.cat([attention_mask_list[i], torch.zeros(pad_len, dtype=torch.long)]))
-                padded_label_ids.append(torch.cat([label_ids_list[i], torch.full((pad_len,), -100, dtype=torch.long)]))
-
+                pad_length = max_len - len(input_ids_list[i])
+                
+                padded_input = torch.cat([
+                    input_ids_list[i],
+                    torch.full((pad_length,), self.pad_token_id, dtype=torch.long)
+                ])
+                padded_input_ids.append(padded_input)
+                
+                padded_mask = torch.cat([
+                    attention_mask_list[i],
+                    torch.zeros(pad_length, dtype=torch.long)
+                ])
+                padded_attention_mask.append(padded_mask)
+                
+                padded_label = torch.cat([
+                    label_ids_list[i],
+                    torch.full((pad_length,), -100, dtype=torch.long)
+                ])
+                padded_label_ids.append(padded_label)
+            
             return ExtendedHiggsAudioBatchInput(
                 input_ids=torch.stack(padded_input_ids),
                 attention_mask=torch.stack(padded_attention_mask),
                 label_ids=torch.stack(padded_label_ids),
-                audio_features=None, audio_feature_attention_mask=None,
-                audio_out_ids=None, audio_out_ids_start=None, audio_out_ids_start_group_loc=None,
-                audio_in_ids=None, audio_in_ids_start=None, label_audio_ids=None, reward=None,
+                audio_features=None,
+                audio_feature_attention_mask=None,
+                audio_out_ids=None,
+                audio_out_ids_start=None,
+                audio_out_ids_start_group_loc=None,
+                audio_in_ids=None,
+                audio_in_ids_start=None,
+                label_audio_ids=None,
+                reward=None,
             )
 
+
 def normalize_chinese_punctuation(text):
+    """
+    Convert Chinese (full-width) punctuation marks to English (half-width) equivalents.
+    """
     chinese_to_english_punct = {
-        "，": ", ", "。": ".", "：": ":", "；": ";", "？": "?", "！": "!", "（": "(", "）": ")",
-        "【": "[", "】": "]", "《": "<", "》": ">", "“": '"', "”": '"', "‘": "'", "’": "'",
-        "、": ",", "——": "-", "…": "...", "·": ".", "「": '"', "」": '"', "『": '"', "』": '"',
+        "，": ", ", "。": ".", "：": ":", "；": ";", "？": "?", "！": "!",
+        "（": "(", "）": ")", "【": "[", "】": "]", "《": "<", "》": ">",
+        """: '"', """: '"', "'": "'", "'": "'", "、": ",", "--": "-",
+        "…": "...", "·": ".", "「": '"', "」": '"', "『": '"', "』": '"',
     }
+
     for zh_punct, en_punct in chinese_to_english_punct.items():
         text = text.replace(zh_punct, en_punct)
+
     return text
 
+
 def _build_system_message_with_audio_prompt(system_message):
+    """Build system message with audio prompts"""
     contents = []
+
     while AUDIO_PLACEHOLDER_TOKEN in system_message:
         loc = system_message.find(AUDIO_PLACEHOLDER_TOKEN)
         contents.append(TextContent(system_message[:loc]))
         contents.append(AudioContent(audio_url=""))
         system_message = system_message[loc + len(AUDIO_PLACEHOLDER_TOKEN):]
+
     if len(system_message) > 0:
         contents.append(TextContent(system_message))
-    return Message(role="system", content=contents)
+    
+    ret = Message(
+        role="system",
+        content=contents,
+    )
+    return ret
 
 
 class HiggsAudioDataset(Dataset):
     def __init__(
-        self,
+        self, 
         data_dir: str,
         tokenizer: AutoTokenizer,
         audio_tokenizer,
@@ -177,7 +243,11 @@ class HiggsAudioDataset(Dataset):
         sample_rate: int = 24000,
         use_metadata: bool = True,
         ref_audio_in_system_message: bool = False,
+        device: Optional[str] = None,
     ):
+        """
+        用于 Higgs Audio 模型训练的数据集。
+        """
         self.data_dir = Path(data_dir)
         self.tokenizer = tokenizer
         self.audio_tokenizer = audio_tokenizer
@@ -185,133 +255,85 @@ class HiggsAudioDataset(Dataset):
         self.sample_rate = sample_rate
         self.use_metadata = use_metadata
         self.ref_audio_in_system_message = ref_audio_in_system_message
-
-        valid_tasks = ["zero_shot_voice_cloning", "single_speaker_smart_voice", "multi_speaker_smart_voice", "multi_speaker_voice_cloning"]
+        self.device = device
+        
+        valid_tasks = [
+            "zero_shot_voice_cloning", 
+            "single_speaker_smart_voice", 
+            "multi_speaker_smart_voice", 
+            "multi_speaker_voice_cloning"
+        ]
         if self.task_type not in valid_tasks:
             raise ValueError(f"Invalid task_type: {self.task_type}. Must be one of {valid_tasks}")
-
+        
         self.actual_num_codebooks = self._detect_codebook_size()
-
+        
         if use_metadata and (self.data_dir / "metadata.json").exists():
             self.samples = self._load_samples_from_metadata()
         else:
             logger.warning(f"metadata.json not found in {data_dir}. Scanning directory instead.")
-            self.samples = self._scan_data_directory()
+            self.samples = self._load_samples_from_directory()
+            
+        if not self.samples:
+            raise RuntimeError(f"No valid samples found in {data_dir} for task '{self.task_type}'. Please check your data and metadata.json.")
+            
+        logger.info(f"Loaded {len(self.samples)} samples from {data_dir} for task: {self.task_type}")
 
-    def _detect_codebook_size(self):
-        """Detect the actual number of codebooks in the audio tokenizer"""
-        if self.audio_tokenizer is None:
-            return 8  # Default fallback
+    def _detect_codebook_size(self) -> int:
+        """通过编码一个测试音频来动态检测音频 tokenizer 的 codebook 数量。"""
         try:
-            # Try to get the codebook size from the tokenizer configuration
-            if hasattr(self.audio_tokenizer, 'config') and hasattr(self.audio_tokenizer.config, 'codebook_size'):
-                return self.audio_tokenizer.config.codebook_size
-            # Fallback to default
-            return 8
+            audio_files = list(self.data_dir.glob("*.wav")) + list(self.data_dir.glob("*.mp3"))
+            if audio_files:
+                test_audio_path = str(audio_files[0])
+                test_tokens = self._encode_audio_tokens(test_audio_path)
+                if test_tokens is not None and test_tokens.dim() == 2:
+                    logger.info(f"Detected {test_tokens.shape[0]} codebooks from audio tokenizer.")
+                    return test_tokens.shape[0]
         except Exception as e:
-            logger.warning(f"Could not detect codebook size: {e}. Using default of 8.")
-            return 8
+            logger.warning(f"Could not auto-detect codebook size: {e}. Falling back to default.")
+        
+        default_size = getattr(self.audio_tokenizer, 'codebook_size', 8)
+        logger.info(f"Using default codebook size: {default_size}")
+        return default_size
 
-    def _load_samples_from_metadata(self):
-        """Load dataset samples from metadata.json"""
+    def _load_samples_from_metadata(self) -> List[Dict]:
         metadata_path = self.data_dir / "metadata.json"
-        logger.info(f"Loading samples from {metadata_path}")
-        
         with open(metadata_path, 'r', encoding='utf-8') as f:
-            metadata = json.load(f)
-            
-        samples = []
-        for item in metadata:
-            try:
-                # Resolve paths relative to data directory
-                audio_path = item.get("audio_path")
-                if audio_path and not os.path.isabs(audio_path):
-                    audio_path = os.path.normpath(self.data_dir / audio_path)
-                    
-                sample = {
-                    "audio_path": audio_path,
-                    "text": item.get("text", ""),
-                    "speaker": item.get("speaker", "default"),
-                    "task_type": item.get("task_type", self.task_type),
-                }
-                
-                # Validate sample
-                if self._validate_sample(sample):
-                    samples.append(sample)
-            except Exception as e:
-                logger.warning(f"Skipping invalid sample: {e}")
-                
-        logger.info(f"Loaded {len(samples)} valid samples from metadata")
-        return samples
+            metadata = json.load(f).get("samples", [])
+        
+        # 预处理路径，使其成为绝对路径
+        for sample in metadata:
+            sample["audio_file"] = str(self.data_dir / sample["audio_file"])
+            if "transcript_file" in sample:
+                sample["transcript_file"] = str(self.data_dir / sample["transcript_file"])
+        return metadata
 
-    def _scan_data_directory(self):
-        """Scan data directory for audio files and corresponding text files"""
-        logger.info(f"Scanning directory {self.data_dir} for audio files")
-        
-        audio_extensions = {'.wav', '.mp3', '.flac', '.aac', '.m4a'}
+    def _load_samples_from_directory(self) -> List[Dict]:
         samples = []
-        
-        for file_path in self.data_dir.rglob('*'):
-            if file_path.suffix.lower() in audio_extensions:
-                try:
-                    # Look for corresponding text file
-                    text_file = file_path.with_suffix('.txt')
-                    if not text_file.exists():
-                        # Try alternative naming patterns
-                        text_file = file_path.parent / f"{file_path.stem}.txt"
-                        
-                    if text_file.exists():
-                        with open(text_file, 'r', encoding='utf-8') as f:
-                            text = f.read().strip()
-                            
-                        sample = {
-                            "audio_path": str(file_path),
-                            "text": text,
-                            "speaker": "default",
-                            "task_type": self.task_type,
-                        }
-                        
-                        if self._validate_sample(sample):
-                            samples.append(sample)
-                except Exception as e:
-                    logger.warning(f"Error processing {file_path}: {e}")
-                    
-        logger.info(f"Found {len(samples)} valid samples by scanning directory")
+        audio_files = list(self.data_dir.glob("*.wav")) + list(self.data_dir.glob("*.mp3"))
+        for audio_path in audio_files:
+            transcript_path = audio_path.with_suffix('.txt')
+            if transcript_path.exists():
+                samples.append({
+                    "audio_file": str(audio_path),
+                    "transcript_file": str(transcript_path),
+                    "audio_id": audio_path.stem,
+                })
         return samples
-
-    def _validate_sample(self, sample):
-        """Validate a dataset sample"""
-        audio_path = sample.get("audio_path")
-        text = sample.get("text", "")
-        
-        # Check if audio file exists
-        if audio_path and not os.path.exists(audio_path):
-            logger.warning(f"Audio file not found: {audio_path}")
-            return False
-            
-        # Check if text is not empty
-        if not text.strip():
-            logger.warning(f"Empty text for sample: {audio_path}")
-            return False
-            
-        return True
 
     def _load_audio_waveform(self, audio_path: str) -> Tuple[torch.Tensor, int]:
-        """Load and process audio waveform"""
         try:
             waveform, sr = torchaudio.load(audio_path)
             if waveform.shape[0] > 1:
                 waveform = waveform.mean(dim=0, keepdim=True)
             if sr != self.sample_rate:
-                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
-                waveform = resampler(waveform)
+                waveform = torchaudio.functional.resample(waveform, orig_freq=sr, new_freq=self.sample_rate)
             return waveform.squeeze(0), self.sample_rate
         except Exception as e:
             logger.error(f"Failed to load audio {audio_path}: {e}")
             return torch.zeros(1), self.sample_rate
 
     def _encode_audio_tokens(self, audio_path: str) -> Optional[torch.Tensor]:
-        """Encode audio to tokens using audio tokenizer"""
         if not self.audio_tokenizer: 
             return None
         try:
@@ -320,234 +342,160 @@ class HiggsAudioDataset(Dataset):
             logger.error(f"Failed to encode audio {audio_path}: {e}")
             return None
 
-    def _prepare_multispeaker_smart_voice_sample(self, sample: Dict) -> ChatMLDatasetSample:
-        """Prepare sample for multi-speaker smart voice task"""
-        text = sample["text"]
-        audio_path = sample["audio_path"]
-        speaker = sample["speaker"]
+    def _normalize_transcript(self, transcript: str) -> str:
+        """Normalize transcript text"""
+        transcript = normalize_chinese_punctuation(transcript)
+        transcript = transcript.replace("(", " ").replace(")", " ")
+        transcript = transcript.replace("°F", " degrees Fahrenheit").replace("°C", " degrees Celsius")
         
-        # Create system message with speaker information
-        system_message = f"[SPEAKER_{speaker}] {MULTISPEAKER_DEFAULT_SYSTEM_MESSAGE}"
-        system_content = _build_system_message_with_audio_prompt(system_message)
+        for tag, replacement in [("[laugh]", "<SE>[Laughter]</SE>"), ("[cough]", "<SE>[Cough]</SE>"),]:
+            transcript = transcript.replace(tag, replacement)
+            
+        lines = transcript.split("\n")
+        transcript = "\n".join([" ".join(line.split()) for line in lines if line.strip()])
         
-        # Load and encode audio
-        waveform, sr = self._load_audio_waveform(audio_path)
-        audio_tokens = self._encode_audio_tokens(audio_path)
-        
-        # Create messages
-        messages = [
-            Message(role="system", content=system_content),
-            Message(role="user", content=text),
-            Message(role="assistant", content=AudioContent(audio_url=audio_path))
-        ]
-        
-        chatml_sample = ChatMLSample(messages=messages)
-        
-        # Process with prepare function
-        input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(
-            chatml_sample, self.tokenizer
-        )
-        
-        # Process audio data
-        context_audio_tokens = []
-        for audio_content in (audio_contents or []):
-            if audio_content.audio_url:
-                tokens = self._encode_audio_tokens(audio_content.audio_url)
-                if tokens is not None:
-                    context_audio_tokens.append(tokens)
+        if transcript and not any(transcript.endswith(c) for c in ".!?,\";'</SE_e></SE>"):
+            transcript += "."
+            
+        return transcript.strip()
 
-        label_audio_tokens = []
-        for audio_label_content in (audio_label_contents or []):
-            if audio_label_content and audio_label_content.audio_url:
-                tokens = self._encode_audio_tokens(audio_label_content.audio_url)
-                if tokens is not None:
-                    label_audio_tokens.append(tokens)
+    def _get_scene_description(self, sample: Dict) -> str:
+        scene = sample.get("scene", "a quiet room")
+        return f"Audio is recorded from {scene.replace('_', ' ')}."
 
-        # Concatenate tensors
-        if context_audio_tokens:
-            audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
-            audio_ids_start = torch.tensor(
-                np.cumsum(np.array([0] + [t.shape[1] for t in context_audio_tokens[:-1]])),
-                dtype=torch.long
-            )
-        else:
-            audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
-            audio_ids_start = torch.tensor([0], dtype=torch.long)
+    def _detect_speaker_tags(self, transcript: str) -> List[str]:
+        return sorted(set(re.findall(r"\[(SPEAKER\d+)\]", transcript)))
+    
+    def _create_messages_for_task(self, sample: Dict, transcript: str) -> List[Message]:
+        """
+        根据任务类型为给定的样本创建消息列表（提示）。
+        """
+        messages = []
+        speaker_tags = self._detect_speaker_tags(transcript)
+        scene_prompt = self._get_scene_description(sample) if self.use_metadata else None
 
-        label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
+        if self.task_type == "zero_shot_voice_cloning":
+            ref_audio = sample.get("ref_audio_file")
+            if not ref_audio:
+                logger.warning(f"Sample {sample['id']} is for zero_shot_voice_cloning but has no 'ref_audio_file'.")
+                return [Message(role="system", content="Generate audio following instruction.")]
 
-        return ChatMLDatasetSample(
-            input_ids=torch.tensor(input_tokens, dtype=torch.long),
-            label_ids=torch.tensor(label_tokens, dtype=torch.long),
-            audio_ids_concat=audio_ids_concat,
-            audio_ids_start=audio_ids_start,
-            label_audio_ids=label_audio_ids,
-            audio_waveforms_concat=waveform,
-            audio_waveforms_start=torch.tensor([0], dtype=torch.long),
-            audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
-            audio_speaker_indices=torch.tensor([0], dtype=torch.long),
-        )
+            ref_audio_path = str(self.data_dir / ref_audio)
+            ref_transcript = sample.get("ref_transcript", "This is a voice sample for cloning.")
 
-    def _prepare_zero_shot_voice_cloning_sample(self, sample: Dict) -> ChatMLDatasetSample:
-        """Prepare sample for zero-shot voice cloning task"""
-        text = sample["text"]
-        audio_path = sample["audio_path"]
+            if self.ref_audio_in_system_message:
+                system_content = f"Generate audio following instruction.\n\n<|scene_desc_start|>\n{scene_prompt}\n\nSPEAKER0: {AUDIO_PLACEHOLDER_TOKEN}\n<|scene_desc_end|>"
+                messages.append(_build_system_message_with_audio_prompt(system_content))
+            else:
+                messages.append(Message(role="system", content=f"Generate audio following instruction.\n\n<|scene_desc_start|>\n{scene_prompt}\n<|scene_desc_end|>"))
+                messages.append(Message(role="user", content=ref_transcript))
+                messages.append(Message(role="assistant", content=AudioContent(audio_url=ref_audio_path)))
         
-        # Create system message for zero-shot voice cloning
-        system_message = "Generate speech in the provided voice."
-        system_content = Message(role="system", content=system_message)
-        
-        # Load and encode reference audio
-        waveform, sr = self._load_audio_waveform(audio_path)
-        audio_tokens = self._encode_audio_tokens(audio_path)
-        
-        # Create messages for zero-shot voice cloning
-        messages = [
-            Message(role="system", content=system_content),
-            Message(role="user", content=text),
-            Message(role="assistant", content=AudioContent(audio_url=audio_path))
-        ]
-        
-        chatml_sample = ChatMLSample(messages=messages)
-        
-        # Process with prepare function
-        input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(
-            chatml_sample, self.tokenizer
-        )
-        
-        # Process audio data
-        context_audio_tokens = []
-        for audio_content in (audio_contents or []):
-            if audio_content.audio_url:
-                tokens = self._encode_audio_tokens(audio_content.audio_url)
-                if tokens is not None:
-                    context_audio_tokens.append(tokens)
+        elif self.task_type == "multi_speaker_voice_cloning":
+            ref_speakers = sample.get("ref_speakers")
+            if not ref_speakers or not isinstance(ref_speakers, list):
+                logger.warning(f"Sample {sample['audio_id']} is for multi_speaker_voice_cloning but has no valid 'ref_speakers' list in metadata.")
+                return [Message(role="system", content=MULTISPEAKER_DEFAULT_SYSTEM_MESSAGE)]
+            
+            for i, ref_info in enumerate(ref_speakers):
+                speaker_tag = ref_info.get("speaker_tag", f"[SPEAKER{i}]")
+                ref_audio_path = str(self.data_dir / ref_info["ref_audio_file"])
+                ref_transcript = ref_info.get("ref_transcript", "This is a voice sample.")
+                messages.append(Message(role="user", content=f"{speaker_tag} {ref_transcript}"))
+                messages.append(Message(role="assistant", content=AudioContent(audio_url=ref_audio_path)))
+            
+            messages.insert(0, Message(role="system", content=f"Generate audio following instruction.\n\n<|scene_desc_start|>\n{scene_prompt}\n<|scene_desc_end|>"))
 
-        label_audio_tokens = []
-        for audio_label_content in (audio_label_contents or []):
-            if audio_label_content and audio_label_content.audio_url:
-                tokens = self._encode_audio_tokens(audio_label_content.audio_url)
-                if tokens is not None:
-                    label_audio_tokens.append(tokens)
-
-        # Concatenate tensors
-        if context_audio_tokens:
-            audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
-            audio_ids_start = torch.tensor(
-                np.cumsum(np.array([0] + [t.shape[1] for t in context_audio_tokens[:-1]])),
-                dtype=torch.long
-            )
-        else:
-            audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
-            audio_ids_start = torch.tensor([0], dtype=torch.long)
-
-        label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
-
-        return ChatMLDatasetSample(
-            input_ids=torch.tensor(input_tokens, dtype=torch.long),
-            label_ids=torch.tensor(label_tokens, dtype=torch.long),
-            audio_ids_concat=audio_ids_concat,
-            audio_ids_start=audio_ids_start,
-            label_audio_ids=label_audio_ids,
-            audio_waveforms_concat=waveform,
-            audio_waveforms_start=torch.tensor([0], dtype=torch.long),
-            audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
-            audio_speaker_indices=torch.tensor([0], dtype=torch.long),
-        )
+        elif self.task_type == "multi_speaker_smart_voice" and len(speaker_tags) > 1:
+            speaker_desc_l = [f"{tag}: {'feminine' if i % 2 == 0 else 'masculine'}" for i, tag in enumerate(speaker_tags)]
+            scene_desc = f"{scene_prompt}\n\n" + "\n".join(speaker_desc_l) if scene_prompt else "\n".join(speaker_desc_l)
+            messages.append(Message(role="system", content=f"{MULTISPEAKER_DEFAULT_SYSTEM_MESSAGE}\n\n<|scene_desc_start|>\n{scene_desc}\n<|scene_desc_end|>"))
+        
+        else: # single_speaker_smart_voice 或其他回退情况
+            content = "Generate audio following instruction."
+            if scene_prompt:
+                content += f"\n\n<|scene_desc_start|>\n{scene_prompt}\n<|scene_desc_end|>"
+            messages.append(Message(role="system", content=content))
+            
+        return messages
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx: int) -> ChatMLDatasetSample:
-        """Get a dataset sample by index"""
         sample = self.samples[idx]
-        task_type = sample.get("task_type", self.task_type)
         
         try:
-            if task_type == "multi_speaker_smart_voice":
-                return self._prepare_multispeaker_smart_voice_sample(sample)
-            elif task_type == "zero_shot_voice_cloning":
-                return self._prepare_zero_shot_voice_cloning_sample(sample)
+            with open(sample["transcript_file"], 'r', encoding='utf-8') as f:
+                transcript = f.read().strip()
+            transcript = self._normalize_transcript(transcript)
+            
+            # 1. 构建消息历史（提示）
+            messages = self._create_messages_for_task(sample, transcript)
+            
+            # 2. 添加当前样本的目标对话
+            messages.append(Message(role="user", content=transcript))
+            messages.append(Message(role="assistant", content=AudioContent(audio_url=sample["audio_file"])))
+
+            chatml_sample = ChatMLSample(messages=messages)
+            
+            # 3. 使用处理函数处理 ChatML 样本
+            input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(
+                chatml_sample, self.tokenizer
+            )
+
+            # 4. 处理音频数据
+            context_audio_tokens = []
+            for audio_content in (audio_contents or []):
+                if audio_content.audio_url:
+                    tokens = self._encode_audio_tokens(audio_content.audio_url)
+                    if tokens is not None: 
+                        context_audio_tokens.append(tokens)
+
+            label_audio_tokens = []
+            for audio_label_content in (audio_label_contents or []):
+                if audio_label_content.audio_url:
+                    tokens = self._encode_audio_tokens(audio_label_content.audio_url)
+                    if tokens is not None: 
+                        label_audio_tokens.append(tokens)
+
+            # 5. 拼接张量
+            if context_audio_tokens:
+                audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
+                audio_ids_start = torch.tensor([0] + [t.shape[1] for t in context_audio_tokens[:-1]], dtype=torch.long).cumsum(0)
             else:
-                # Default handling for other task types
-                text = sample["text"]
-                audio_path = sample["audio_path"]
-                
-                # Load and encode audio
-                waveform, sr = self._load_audio_waveform(audio_path)
-                audio_tokens = self._encode_audio_tokens(audio_path)
-                
-                # Simple message structure for other tasks
-                messages = [
-                    Message(role="user", content=text),
-                    Message(role="assistant", content=AudioContent(audio_url=audio_path))
-                ]
-                
-                chatml_sample = ChatMLSample(messages=messages)
-                
-                # Process with prepare function
-                input_tokens, label_tokens, audio_contents, audio_label_contents, _ = prepare_chatml_sample(
-                    chatml_sample, self.tokenizer
-                )
-                
-                # Process audio data
-                context_audio_tokens = []
-                for audio_content in (audio_contents or []):
-                    if audio_content.audio_url:
-                        tokens = self._encode_audio_tokens(audio_content.audio_url)
-                        if tokens is not None:
-                            context_audio_tokens.append(tokens)
+                audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
+                audio_ids_start = torch.tensor([0], dtype=torch.long)
 
-                label_audio_tokens = []
-                for audio_label_content in (audio_label_contents or []):
-                    if audio_label_content and audio_label_content.audio_url:
-                        tokens = self._encode_audio_tokens(audio_label_content.audio_url)
-                        if tokens is not None:
-                            label_audio_tokens.append(tokens)
+            label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
 
-                # Concatenate tensors
-                if context_audio_tokens:
-                    audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
-                    audio_ids_start = torch.tensor(
-                        np.cumsum(np.array([0] + [t.shape[1] for t in context_audio_tokens[:-1]])),
-                        dtype=torch.long
-                    )
-                else:
-                    audio_ids_concat = torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long)
-                    audio_ids_start = torch.tensor([0], dtype=torch.long)
-
-                label_audio_ids = torch.cat(label_audio_tokens, dim=1) if label_audio_tokens else None
-
-                return ChatMLDatasetSample(
-                    input_ids=torch.tensor(input_tokens, dtype=torch.long),
-                    label_ids=torch.tensor(label_tokens, dtype=torch.long),
-                    audio_ids_concat=audio_ids_concat,
-                    audio_ids_start=audio_ids_start,
-                    label_audio_ids=label_audio_ids,
-                    audio_waveforms_concat=waveform,
-                    audio_waveforms_start=torch.tensor([0], dtype=torch.long),
-                    audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
-                    audio_speaker_indices=torch.tensor([0], dtype=torch.long),
-                )
-                
-        except Exception as e:
-            logger.error(f"Error processing sample at index {idx}: {e}", exc_info=True)
-            # Return a simple fallback sample
-            return ChatMLDatasetSample(
-                input_ids=torch.tensor([0], dtype=torch.long),
-                label_ids=torch.tensor([-100], dtype=torch.long),
-                audio_ids_concat=torch.zeros((self.actual_num_codebooks, 0), dtype=torch.long),
-                audio_ids_start=torch.tensor([0], dtype=torch.long),
-                label_audio_ids=None,
-                audio_waveforms_concat=torch.zeros(1),
+            # 为 ChatMLDatasetSample 准备其他字段
+            waveform, sr = self._load_audio_waveform(sample["audio_file"])
+            
+            dataset_sample = ChatMLDatasetSample(
+                input_ids=torch.tensor(input_tokens, dtype=torch.long),
+                label_ids=torch.tensor(label_tokens, dtype=torch.long),
+                audio_ids_concat=audio_ids_concat,
+                audio_ids_start=audio_ids_start,
+                label_audio_ids=label_audio_ids,
+                audio_waveforms_concat=waveform,
                 audio_waveforms_start=torch.tensor([0], dtype=torch.long),
-                audio_sample_rate=torch.tensor([24000], dtype=torch.float32),
+                audio_sample_rate=torch.tensor([sr], dtype=torch.float32),
                 audio_speaker_indices=torch.tensor([0], dtype=torch.long),
             )
+            
+            # 将所有张量移动到指定设备
+            return dataset_sample.to(self.device) if self.device else dataset_sample
+
+        except Exception as e:
+            logger.error(f"Error processing sample at index {idx} (ID: {sample.get('audio_id', 'N/A')}): {e}", exc_info=True)
+            # 返回下一个样本，避免因单个损坏样本导致训练中断
+            return self.__getitem__((idx + 1) % len(self))
 
 
 class HiggsAudioModelWrapper(nn.Module):
     """Wrapper for Higgs Audio v2 model to enable training"""
+    
     def __init__(self, model_path: str, device: str = 'cuda', args=None):
         super().__init__()
         if HIGGS_AVAILABLE:
@@ -555,7 +503,7 @@ class HiggsAudioModelWrapper(nn.Module):
                 config=HiggsAudioConfig.from_pretrained(model_path),
                 pretrained_model_name_or_path=model_path,
                 torch_dtype=torch.bfloat16,
-                device_map={'': device},
+                device_map=device,
             )
             self.config = self.model.config
         else:
@@ -565,41 +513,40 @@ class HiggsAudioModelWrapper(nn.Module):
         self.model = self.model.to(device)
         
         if args:
-            if args.freeze_audio_tower: self.model.freeze_audio_tower()
-            if args.freeze_audio_encoder_proj: self.model.freeze_audio_encoder_proj()
-            if args.freeze_llm: self.model.freeze_llm()
+            if args.freeze_audio_tower:
+                self.model.freeze_audio_tower()
+            if args.freeze_audio_encoder_proj:
+                self.model.freeze_audio_encoder_proj()
+            if args.freeze_llm:
+                self.model.freeze_llm()
+
 
     @property
     def device(self):
         return self.model.device
           
     def forward(self, **kwargs):
-        """
-        Forward pass with proper type alignment.
-        This follows the same pattern as the inference script.
-        """
-        # --- 开始终极修复 ---
-        # 在数据进入底层模型之前，强制将所有浮点张量类型与模型权重对齐。
-        # 这是解决顽固类型不匹配问题的最可靠方法。
-        model_dtype = next(self.model.parameters()).dtype
-        
-        for key, value in kwargs.items():
-            # 仅转换浮点类型的张量，忽略整数类型（如 input_ids）
-            if isinstance(value, torch.Tensor) and value.is_floating_point():
-                kwargs[key] = value.to(model_dtype)
-        # --- 结束终极修复 ---
+        if self.model.device != kwargs['input_ids'].device:
+            self.model = self.model.to(kwargs['input_ids'].device)
 
         if HIGGS_AVAILABLE:
             return self.model(**kwargs)
         else:
-            # Fallback 逻辑也受益于上面的类型转换
-            outputs = self.model(input_ids=kwargs.get('input_ids'), attention_mask=kwargs.get('attention_mask'))
+            input_ids = kwargs.get('input_ids')
+            attention_mask = kwargs.get('attention_mask')
+            labels = kwargs.get('label_ids')
+            
+            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            
             loss = None
-            if kwargs.get('label_ids') is not None:
-                logits = outputs.logits[..., :-1, :].contiguous()
-                labels = kwargs.get('label_ids')[..., 1:].contiguous()
-                loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), labels.view(-1))
+            if labels is not None:
+                shift_logits = outputs.logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                loss_fct = nn.CrossEntropyLoss()
+                loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                
             return {"loss": loss, "logits": outputs.logits}
+
 
 class HiggsAudioTrainer(Trainer):
     """Custom trainer for Higgs Audio v2"""
@@ -641,25 +588,6 @@ class HiggsAudioTrainer(Trainer):
         
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
-        
-    def evaluation_loop(self, dataloader, description, prediction_loss_only=None, ignore_keys=None, metric_key_prefix="eval"):
-        """
-        Custom evaluation loop that ensures eval_loss is computed and returned
-        """
-        # Force prediction_loss_only to False to ensure loss is computed
-        if prediction_loss_only is None:
-            prediction_loss_only = False
-            
-        # Call the parent evaluation loop
-        eval_result = super().evaluation_loop(
-            dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix
-        )
-        
-        # Ensure eval_loss is in the metrics
-        if "eval_loss" not in eval_result.metrics and hasattr(eval_result, 'loss'):
-            eval_result.metrics["eval_loss"] = eval_result.loss
-            
-        return eval_result
 
 
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
@@ -681,27 +609,12 @@ def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     
     model = model.to(device)
     
-    logger.info(f"Applying LoRA configuration to model of type: {type(model)}")
-    
     if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
-        logger.info("Applying LoRA to model.model.text_model")
         model.model.text_model = get_peft_model(model.model.text_model, peft_config)
-        logger.info(f"Model.model.text_model type after LoRA: {type(model.model.text_model)}")
     elif hasattr(model, 'model'):
-        logger.info("Applying LoRA to model.model")
         model.model = get_peft_model(model.model, peft_config)
-        logger.info(f"Model.model type after LoRA: {type(model.model)}")
     else:
-        logger.info("Applying LoRA to model directly")
         model = get_peft_model(model, peft_config)
-        logger.info(f"Model type after LoRA: {type(model)}")
-    
-    # Verify that the model has the save_pretrained method
-    logger.info(f"Model has save_pretrained method: {hasattr(model, 'save_pretrained')}")
-    if hasattr(model, 'model'):
-        logger.info(f"Model.model has save_pretrained method: {hasattr(model.model, 'save_pretrained')}")
-        if hasattr(model.model, 'text_model'):
-            logger.info(f"Model.model.text_model has save_pretrained method: {hasattr(model.model.text_model, 'save_pretrained')}")
     
     model = model.to(device)
     return model
@@ -736,8 +649,6 @@ def main():
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--save_steps", type=int, default=5000)
     parser.add_argument("--eval_steps", type=int, default=500)
-    parser.add_argument("--disable_evaluation", action="store_true", default=False,
-                       help="Disable evaluation during training to avoid checkpoint/evaluation mismatch")
     
     # LoRA arguments
     parser.add_argument("--use_lora", action="store_true", default=False)
@@ -791,19 +702,10 @@ def main():
             "rank": args.lora_rank,
             "alpha": args.lora_alpha,
             "dropout": args.lora_dropout,
-            "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+            "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"]
         }
-        logger.info("Setting up LoRA configuration...")
         model = setup_lora_config(model, lora_config)
         logger.info("LoRA configuration applied")
-        
-        # Additional verification
-        logger.info(f"Model type after LoRA setup: {type(model)}")
-        if hasattr(model, 'model'):
-            logger.info(f"Model.model type: {type(model.model)}")
-            if hasattr(model.model, 'text_model'):
-                logger.info(f"Model.model.text_model type: {type(model.model.text_model)}")
-        logger.info(f"Model has PeftModel attributes: {hasattr(model, 'save_pretrained')}")
     
     # Load datasets
     train_dataset = HiggsAudioDataset(
@@ -824,9 +726,6 @@ def main():
             ref_audio_in_system_message=args.ref_audio_in_system_message
         )
     
-    # Determine if evaluation should be enabled
-    evaluation_enabled = eval_dataset is not None and not args.disable_evaluation
-    
     # Setup training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -837,18 +736,18 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        eval_steps=args.eval_steps if evaluation_enabled else None,
-        evaluation_strategy="steps" if evaluation_enabled else "no",
+        eval_steps=args.eval_steps,
+        evaluation_strategy="steps" if eval_dataset else "no",
         save_total_limit=3,
-        load_best_model_at_end=evaluation_enabled,  # Only True when evaluation is enabled
-        metric_for_best_model="eval_loss" if evaluation_enabled else None,
+        load_best_model_at_end=True if eval_dataset else False,
+        metric_for_best_model="eval_loss" if eval_dataset else None,
         fp16=args.fp16,
         dataloader_pin_memory=False,
         remove_unused_columns=False,
         report_to=args.report_to if args.report_to != "none" else None,
         logging_dir=args.logging_dir,
     )
-
+    
     # Setup data collator
     if HIGGS_AVAILABLE and hasattr(model.config, 'audio_in_token_idx'):
         try:
@@ -892,40 +791,18 @@ def main():
     # Save the final model
     config.save_pretrained(args.output_dir)
     trainer.save_model()
-    logger.info(f"Model checkpoints saved to {args.output_dir}")
+    logger.info(f"Model saved to {args.output_dir}")
     
     # Save LoRA adapters separately
     if args.use_lora:
-        logger.info("LoRA flag is set, attempting to save LoRA adapters...")
         lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-        logger.info(f"LoRA output directory: {lora_output_dir}")
-        
-        # Use trainer.model instead of original model for LoRA saving
-        model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-        logger.info(f"Model to save type: {type(model_to_save)}")
-        logger.info(f"Model to save has save_pretrained method: {hasattr(model_to_save, 'save_pretrained')}")
-        
-        # Additional debugging info
-        if hasattr(model_to_save, 'model'):
-            logger.info(f"Model to save has model attribute")
-            if hasattr(model_to_save.model, 'text_model'):
-                logger.info(f"Model to save.model has text_model attribute")
-        
-        try:
-            logger.info(f"Creating directory: {lora_output_dir}")
-            os.makedirs(lora_output_dir, exist_ok=True)
-            logger.info(f"Directory creation successful. Directory exists: {os.path.exists(lora_output_dir)}")
-            logger.info(f"Calling save_pretrained on model")
-            model_to_save.save_pretrained(lora_output_dir)
-            logger.info(f"LoRA adapters saved to {lora_output_dir}")
-            logger.info(f"Contents of lora_output_dir after save: {os.listdir(lora_output_dir) if os.path.exists(lora_output_dir) else 'Directory does not exist'}")
-            logger.info("IMPORTANT: LoRA adapters are saved SEPARATELY from model checkpoints!")
-            logger.info("To merge LoRA adapters with base model, use the merger.py script:")
-            logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
-            logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
-        except Exception as e:
-            logger.error(f"Failed to save LoRA adapters: {e}")
-            logger.exception("Exception details:")
+        if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
+            model.model.text_model.save_pretrained(lora_output_dir)
+        elif hasattr(model, 'model'):
+            model.model.save_pretrained(lora_output_dir)
+        else:
+            model.save_pretrained(lora_output_dir)
+        logger.info(f"LoRA adapters saved to {lora_output_dir}")
 
 
 if __name__ == "__main__":
