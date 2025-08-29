@@ -636,8 +636,7 @@ class HiggsAudioTrainer(Trainer):
         Custom evaluation loop that ensures eval_loss is computed and returned
         """
         # Force prediction_loss_only to False to ensure loss is computed (like trainer.py)
-        if prediction_loss_only is None:
-            prediction_loss_only = False
+        prediction_loss_only = False
             
         # Call the parent evaluation loop
         eval_result = super().evaluation_loop(
@@ -655,9 +654,9 @@ class HiggsAudioTrainer(Trainer):
             # Tertiary fallback: Look for loss in other possible keys
             elif 'eval_loss' in eval_result.metrics:
                 eval_result.metrics["eval_loss"] = eval_result.metrics['eval_loss']
-            # Last resort fallback: Set to 0.0 to prevent KeyError and allow training to continue
+            # Last resort fallback: Set to a large value to indicate issue but allow training to continue
             else:
-                eval_result.metrics["eval_loss"] = 0.0
+                eval_result.metrics["eval_loss"] = 999999.0  # Large value to indicate issue
                 
         return eval_result
 
@@ -806,6 +805,22 @@ def main():
         eval_dataset = None
         logger.info(f"Using all data for training: {len(train_dataset)} samples")
 
+    # Determine if evaluation should be enabled
+    evaluation_enabled = eval_dataset is not None
+
+    def compute_metrics(eval_pred):
+        """Compute metrics for evaluation"""
+        # For our model, the loss is already computed and returned in the predictions
+        # eval_pred is a tuple of (predictions, labels)
+        predictions = eval_pred.predictions if hasattr(eval_pred, 'predictions') else eval_pred[0]
+        
+        # If predictions is a dict with loss, return it
+        if isinstance(predictions, dict) and 'loss' in predictions:
+            return {"eval_loss": predictions['loss'].mean().item() if torch.is_tensor(predictions['loss']) else float(predictions['loss'])}
+        else:
+            # Return a default value
+            return {"eval_loss": 0.0}
+
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -815,11 +830,11 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        evaluation_strategy="steps" if eval_dataset else "no",
-        eval_steps=args.eval_steps if eval_dataset else None,
+        evaluation_strategy="steps" if evaluation_enabled else "no",
+        eval_steps=args.eval_steps if evaluation_enabled else None,
         save_total_limit=3,
-        load_best_model_at_end=True if eval_dataset else False,
-        metric_for_best_model="eval_loss" if eval_dataset else None,
+        load_best_model_at_end=True if evaluation_enabled else False,
+        metric_for_best_model="eval_loss" if evaluation_enabled else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
@@ -863,6 +878,7 @@ def main():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        compute_metrics=compute_metrics if evaluation_enabled else None,
     )
 
     logger.info(f"Starting zero-shot voice cloning training on device: {device}")
