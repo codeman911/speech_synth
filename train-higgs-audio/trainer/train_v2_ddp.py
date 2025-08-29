@@ -862,6 +862,9 @@ def main():
             logger.info("To merge LoRA adapters with base model, use the merger.py script:")
             logger.info(f"  python trainer/merger.py --base_model_path {args.model_path} --lora_adapter_path {lora_output_dir} --output_path ./merged_model")
             logger.info("DO NOT try to use checkpoint directories with merger.py - they don't contain LoRA adapters!")
+        else:
+            logger.info("NOTE: LoRA adapters were not saved because --use_lora flag was not specified.")
+            logger.info("To save LoRA adapters, add --use_lora to your training command.")
 
 if __name__ == "__main__":
     main()
