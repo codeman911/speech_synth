@@ -35,12 +35,17 @@ All training scripts (`train_v2.py`, `train_v2_ddp.py`, `trainer.py`, `trainer_d
 - Clear instructions on how to merge LoRA adapters
 - Warnings not to use checkpoint directories with merger script
 
+### 5. Fixed LoRA Saving Logic
+- Modified training scripts to save only LoRA adapters when using `--use_lora`
+- Prevented saving of full model checkpoints when using LoRA to save storage space
+- Added proper error handling and logging for LoRA adapter saving
+
 ## Directory Structure
 ```
 output/
-├── checkpoint-1000/          # Model checkpoint (does NOT contain LoRA adapters)
-├── checkpoint-2000/          # Model checkpoint (does NOT contain LoRA adapters)
-├── lora_adapters/            # LoRA adapters (this is what you need for merging)
+├── checkpoint-100/           # Model checkpoint (full model when not using LoRA, not created when using LoRA)
+├── checkpoint-200/           # Model checkpoint (full model when not using LoRA, not created when using LoRA)
+├── lora_adapters/            # LoRA adapters (created only when using --use_lora)
 │   ├── adapter_config.json
 │   ├── adapter_model.bin
 │   └── README.md

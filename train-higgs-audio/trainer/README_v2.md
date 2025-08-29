@@ -227,14 +227,14 @@ These enhanced logs will help identify whether the issue is with:
 
 ## LoRA Adapters and Model Merging
 
-When training with LoRA enabled (`--use_lora`), the training scripts save LoRA adapters separately from model checkpoints:
+When training with LoRA enabled (`--use_lora`), the training scripts now save LoRA adapters separately from model checkpoints:
 
 ### Directory Structure
 ```
 output/
-├── checkpoint-1000/          # Model checkpoint (does NOT contain LoRA adapters)
-├── checkpoint-2000/          # Model checkpoint (does NOT contain LoRA adapters)
-├── lora_adapters/            # LoRA adapters (this is what you need for merging)
+├── checkpoint-100/           # Model checkpoint (full model when not using LoRA, not created when using LoRA)
+├── checkpoint-200/           # Model checkpoint (full model when not using LoRA, not created when using LoRA)
+├── lora_adapters/            # LoRA adapters (created only when using --use_lora)
 │   ├── adapter_config.json
 │   ├── adapter_model.bin
 │   └── README.md
@@ -242,8 +242,8 @@ output/
 ```
 
 ### Important Notes
-1. **LoRA adapters are saved in a separate `lora_adapters` directory**, NOT in checkpoint directories
-2. **Checkpoint directories do NOT contain LoRA adapters** - they only contain full model checkpoints
+1. **When using `--use_lora`**: Only LoRA adapters are saved in the `lora_adapters` directory, no full model checkpoints are created
+2. **When not using `--use_lora`**: Full model checkpoints are saved in checkpoint directories
 3. **To merge LoRA adapters with the base model, use the `lora_adapters` directory**
 
 ### Merging LoRA Adapters
