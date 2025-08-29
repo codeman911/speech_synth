@@ -888,3 +888,6 @@ def main():
             model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
             model_to_save.save_pretrained(lora_output_dir)
             logger.info(f"LoRA adapters saved to {lora_output_dir}")
+
+if __name__ == "__main__":
+    main()
