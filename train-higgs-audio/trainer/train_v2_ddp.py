@@ -20,6 +20,7 @@ from transformers import (
     AutoConfig,
     TrainingArguments,
     Trainer,
+    TrainerCallback,
 )
 from peft import (
     LoraConfig,
@@ -591,9 +592,10 @@ class HiggsAudioModelWrapper(nn.Module):
 class HiggsAudioTrainer(Trainer):
     """Custom trainer for Higgs Audio v2 with proper loss computation"""
     
-    def __init__(self, **kwargs):
+    def __init__(self, disable_eval=False, **kwargs):
         super().__init__(**kwargs)
         self.config = self.model.config
+        self.disable_eval = disable_eval
     
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Custom loss computation"""
@@ -606,6 +608,12 @@ class HiggsAudioTrainer(Trainer):
         """
         Custom evaluation loop that ensures eval_loss is computed and returned
         """
+        # Check if evaluation is disabled
+        if self.disable_eval:
+            # Return empty evaluation result when evaluation is disabled
+            from transformers.trainer_utils import EvalLoopOutput
+            return EvalLoopOutput(predictions=None, label_ids=None, metrics={}, num_samples=0)
+        
         # Force prediction_loss_only to False to ensure loss is computed
         if prediction_loss_only is None:
             prediction_loss_only = False
@@ -620,7 +628,32 @@ class HiggsAudioTrainer(Trainer):
             eval_result.metrics["eval_loss"] = eval_result.loss
             
         return eval_result
+
+class LoRACheckpointCallback(TrainerCallback):
+    """Custom callback to save LoRA adapters during checkpoint saving"""
+    
+    def on_save(self, args, state, control, **kwargs):
+        """Save LoRA adapters when a checkpoint is saved"""
+        # Get the model from kwargs
+        model = kwargs.get('model')
+        use_lora = getattr(args, 'use_lora', False)
         
+        if use_lora and model:
+            # Get the checkpoint directory
+            checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
+            lora_output_dir = os.path.join(checkpoint_dir, "lora_adapters")
+            
+            # Save LoRA adapters following the same pattern as train_v2.py
+            if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
+                model.model.text_model.save_pretrained(lora_output_dir)
+            elif hasattr(model, 'model'):
+                model.model.save_pretrained(lora_output_dir)
+            else:
+                model.save_pretrained(lora_output_dir)
+            
+            logger.info(f"LoRA adapters saved to {lora_output_dir}")
+
+
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
     """Setup LoRA configuration for the model following the same pattern as trainer_ddp.py"""
     peft_config = LoraConfig(
@@ -699,6 +732,10 @@ def main():
     parser.add_argument("--logging_dir", type=str, default="./logs",
                        help="Directory for logging")
     
+    # Add the new --disable_eval argument
+    parser.add_argument("--disable_eval", action="store_true", default=False,
+                       help="Disable evaluation during training")
+    
     # Freeze model components
     parser.add_argument("--freeze_audio_tower", action="store_true", default=False,
                        help="Freeze audio tower components")
@@ -734,7 +771,8 @@ def main():
         logger.info("Model manually cast to bfloat16.")
 
     if args.use_lora:
-        lora_config = {"rank": args.lora_rank, "alpha": args.lora_alpha, "dropout": args.lora_dropout}
+        lora_config = {"rank": args.lora_rank, "alpha": args.lora_alpha, "dropout": args.lora_dropout,
+                      "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"]}
         model = setup_lora_config(model, lora_config)
         logger.info("LoRA configuration applied")
 
@@ -775,11 +813,11 @@ def main():
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        evaluation_strategy="steps" if eval_dataset else "no",
-        eval_steps=args.eval_steps if eval_dataset else None,
+        evaluation_strategy="steps" if eval_dataset and not args.disable_eval else "no",
+        eval_steps=args.eval_steps if eval_dataset and not args.disable_eval else None,
         save_total_limit=3,
-        load_best_model_at_end=True if eval_dataset else False,
-        metric_for_best_model="eval_loss" if eval_dataset else None,
+        load_best_model_at_end=True if eval_dataset and not args.disable_eval else False,
+        metric_for_best_model="eval_loss" if eval_dataset and not args.disable_eval else None,
         fp16=False,
         bf16=args.bf16,
         dataloader_pin_memory=False,
@@ -791,6 +829,9 @@ def main():
         ddp_find_unused_parameters=True,
         # --- End ultimate fix ---
     )
+    
+    # Add use_lora attribute to training_args so the callback can access it
+    training_args.use_lora = args.use_lora
     
     # Define a compute_metrics function that works with our model
     def compute_metrics(eval_pred):
@@ -840,7 +881,12 @@ def main():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        disable_eval=args.disable_eval,  # Pass the disable_eval flag
     )
+    
+    # Add LoRA checkpoint callback if using LoRA
+    if args.use_lora:
+        trainer.add_callback(LoRACheckpointCallback())
 
     logger.info(f"Starting zero-shot voice cloning training on device: {device}")
     trainer.train()
@@ -850,8 +896,13 @@ def main():
         logger.info(f"Model saved to {args.output_dir}")
         if args.use_lora:
             lora_output_dir = os.path.join(args.output_dir, "lora_adapters")
-            model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-            model_to_save.save_pretrained(lora_output_dir)
+            # Save LoRA adapters following the same pattern as train_v2.py
+            if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
+                model.model.text_model.save_pretrained(lora_output_dir)
+            elif hasattr(model, 'model'):
+                model.model.save_pretrained(lora_output_dir)
+            else:
+                model.save_pretrained(lora_output_dir)
             logger.info(f"LoRA adapters saved to {lora_output_dir}")
 
 if __name__ == "__main__":
