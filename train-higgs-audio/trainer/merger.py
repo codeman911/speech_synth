@@ -79,6 +79,31 @@ class HiggsAudioLoRaMerger:
         """Load model with LoRA adapters"""
         logger.info(f"Loading LoRA adapters from {self.lora_adapter_path}")
         
+        # Check if adapter_config.json exists, if not, create it on the fly
+        adapter_config_path = Path(self.lora_adapter_path) / "adapter_config.json"
+        if not adapter_config_path.exists():
+            logger.warning(f"adapter_config.json not found in {self.lora_adapter_path}. Creating it on the fly.")
+            # Create a default LoRA config
+            default_config = {
+                "base_model_name_or_path": self.base_model_path,
+                "task_type": "CAUSAL_LM",
+                "peft_type": "LORA",
+                "r": 16,
+                "lora_alpha": 32,
+                "lora_dropout": 0.1,
+                "target_modules": [
+                    "q_proj", "v_proj", "k_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"
+                ],
+                "bias": "none",
+                "modules_to_save": None,
+                "fan_in_fan_out": False,
+                "inference_mode": False
+            }
+            with open(adapter_config_path, 'w') as f:
+                json.dump(default_config, f, indent=2)
+            logger.info(f"Created default adapter_config.json at {adapter_config_path}")
+        
         # Load LoRA config
         peft_config = PeftConfig.from_pretrained(self.lora_adapter_path)
         logger.info(f"LoRA config: {peft_config}")
@@ -265,7 +290,13 @@ def main():
     
     # Validate paths
     if not os.path.exists(args.lora_adapter_path):
-        raise ValueError(f"LoRA adapter path does not exist: {args.lora_adapter_path}")
+        # Check if this might be a checkpoint path and suggest the correct lora_adapters path
+        checkpoint_lora_path = os.path.join(args.lora_adapter_path, "lora_adapters")
+        if os.path.exists(checkpoint_lora_path):
+            raise ValueError(f"LoRA adapter path does not exist: {args.lora_adapter_path}. "
+                           f"Did you mean to use: {checkpoint_lora_path} ?")
+        else:
+            raise ValueError(f"LoRA adapter path does not exist: {args.lora_adapter_path}")
         
     # Initialize merger
     merger = HiggsAudioLoRaMerger(args.base_model_path, args.lora_adapter_path)
