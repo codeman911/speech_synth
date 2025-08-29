@@ -898,3 +898,6 @@ def main():
             # For full fine-tuning, save the full model
             trainer.save_model()
             logger.info(f"Model checkpoints saved to {args.output_dir}")
+
+if __name__ == "__main__":
+    main()
