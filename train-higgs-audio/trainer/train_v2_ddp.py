@@ -138,10 +138,6 @@ class ExtendedHiggsAudioSampleCollator:
             self.pad_token_id = kwargs.get('pad_token_id', 0)
 
     def __call__(self, batch: List[ChatMLDatasetSample]):
-        # Import torch when needed
-        if not _import_torch():
-            raise ImportError("torch is required but not available")
-            
         if HIGGS_AVAILABLE and hasattr(self, 'base_collator'):
             batch_input = self.base_collator(batch)
             label_audio_ids = batch_input.audio_out_ids
@@ -259,10 +255,6 @@ class ZeroShotVoiceCloningDataset(Dataset):
 
     def _load_audio_waveform(self, audio_path: str) -> Tuple[torch.Tensor, int]:
         """Load and process audio waveform"""
-        # Import torch when needed
-        if not _import_torch():
-            raise ImportError("torch is required but not available")
-            
         try:
             waveform, sr = torchaudio.load(audio_path)
             if waveform.shape[0] > 1:
@@ -276,10 +268,6 @@ class ZeroShotVoiceCloningDataset(Dataset):
 
     def _encode_audio_tokens(self, audio_path: str) -> Optional[torch.Tensor]:
         """Encode audio to tokens using audio tokenizer"""
-        # Import torch when needed
-        if not _import_torch():
-            raise ImportError("torch is required but not available")
-            
         if not self.audio_tokenizer: 
             return None
         try:
