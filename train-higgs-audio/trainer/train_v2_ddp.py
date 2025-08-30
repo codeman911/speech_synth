@@ -739,15 +739,22 @@ class LoRACheckpointCallback(TrainerCallback):
             checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
             lora_output_dir = os.path.join(checkpoint_dir, "lora_adapters")
             
-            # Save LoRA adapters following the same pattern as train_v2.py
-            if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
-                model.model.text_model.save_pretrained(lora_output_dir)
-            elif hasattr(model, 'model'):
-                model.model.save_pretrained(lora_output_dir)
+            # Only save if the directory doesn't already exist to prevent multiple saves
+            if not os.path.exists(lora_output_dir):
+                try:
+                    # Save LoRA adapters following the same pattern as train_v2.py
+                    if hasattr(model, 'model') and hasattr(model.model, 'text_model'):
+                        model.model.text_model.save_pretrained(lora_output_dir)
+                    elif hasattr(model, 'model'):
+                        model.model.save_pretrained(lora_output_dir)
+                    else:
+                        model.save_pretrained(lora_output_dir)
+                    
+                    logger.info(f"LoRA adapters saved to {lora_output_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to save LoRA adapters: {e}")
             else:
-                model.save_pretrained(lora_output_dir)
-            
-            logger.info(f"LoRA adapters saved to {lora_output_dir}")
+                logger.debug(f"LoRA adapters already saved to {lora_output_dir}, skipping")
 
 
 def setup_lora_config(model: nn.Module, lora_config: Dict) -> nn.Module:
