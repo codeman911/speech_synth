@@ -120,9 +120,14 @@ class InputLoggerCallback(TrainerCallback):
                 log_lines.append(f"├── Audio Features Shape: {model_inputs.audio_features.shape}")
             else:
                 log_lines.append("├── Whisper Embedding Status: ❌ DISABLED or NOT FOUND")
+                # Check for fallback audio data
+                if hasattr(model_inputs, 'audio_waveforms_concat') and model_inputs.audio_waveforms_concat is not None:
+                    log_lines.append(f"├── Audio Waveforms (Fallback): {model_inputs.audio_waveforms_concat.shape if hasattr(model_inputs.audio_waveforms_concat, 'shape') else 'present'}")
+                if hasattr(model_inputs, 'audio_sample_rate') and model_inputs.audio_sample_rate is not None:
+                    log_lines.append(f"├── Audio Sample Rate (Fallback): {model_inputs.audio_sample_rate.shape if hasattr(model_inputs.audio_sample_rate, 'shape') else 'present'}")
             
             if hasattr(model_inputs, 'audio_waveforms_concat') and model_inputs.audio_waveforms_concat is not None:
-                log_lines.append(f"├── Audio Waveforms Shape: {model_inputs.audio_waveforms_concat.shape}")
+                log_lines.append(f"├── Audio Waveforms Shape: {model_inputs.audio_waveforms_concat.shape if hasattr(model_inputs.audio_waveforms_concat, 'shape') else 'present'}")
             
             # Print the log
             log_output = "\n".join(log_lines)
@@ -350,6 +355,12 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                 log_lines.append(f"├── Reference Audio Features: {model_inputs.audio_features.shape}")
             else:
                 log_lines.append("├── Whisper Embedding Status: ❌ DISABLED or NOT FOUND")
+                # Check for fallback audio data
+                if hasattr(model_inputs, 'audio_waveforms_concat') and model_inputs.audio_waveforms_concat is not None:
+                    log_lines.append("├── Audio Waveforms (Fallback): ✅ PRESENT")
+                    log_lines.append(f"├── Audio Waveforms Shape: {model_inputs.audio_waveforms_concat.shape if hasattr(model_inputs.audio_waveforms_concat, 'shape') else 'present'}")
+                else:
+                    log_lines.append("├── Audio Waveforms (Fallback): ❌ NOT FOUND")
             
             # Check for encode_whisper_embed flag
             model = kwargs.get('model')
@@ -365,6 +376,10 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                 log_lines.append(f"├── Audio Input Tokens: {model_inputs.audio_in_ids.shape}")
             else:
                 log_lines.append("├── DAC Code Conditioning: ❌ NOT FOUND")
+                # Check for fallback audio data
+                if hasattr(model_inputs, 'audio_ids_concat') and model_inputs.audio_ids_concat is not None:
+                    log_lines.append("├── Audio IDs (Fallback): ✅ PRESENT")
+                    log_lines.append(f"├── Audio IDs Shape: {model_inputs.audio_ids_concat.shape}")
             
             # ChatML structure verification
             log_lines.append("ChatML Structure Verification:")

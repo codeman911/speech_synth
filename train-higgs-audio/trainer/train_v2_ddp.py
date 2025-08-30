@@ -117,6 +117,9 @@ class ExtendedHiggsAudioBatchInput:
                 attr_value = getattr(self, attr_name)
                 if isinstance(attr_value, torch.Tensor):
                     setattr(self, attr_name, attr_value.to(device))
+                # Also handle lists of tensors
+                elif isinstance(attr_value, list) and all(isinstance(item, torch.Tensor) for item in attr_value):
+                    setattr(self, attr_name, [item.to(device) for item in attr_value])
         return self
 
     def keys(self):
@@ -157,29 +160,85 @@ class ExtendedHiggsAudioSampleCollator:
             )
             return extended_batch
         else:
-            # Fallback implementation
+            # Fallback implementation - Enhanced to include audio features for Whisper embedding
             input_ids_list, attention_mask_list, label_ids_list = [], [], []
+            audio_features_list, audio_feature_attention_mask_list = [], []
+            audio_waveforms_concat_list, audio_waveforms_start_list = [], []
+            audio_sample_rate_list, audio_speaker_indices_list = [], []
+            
             for sample in batch:
                 input_ids_list.append(sample.input_ids)
                 attention_mask_list.append(torch.ones_like(sample.input_ids))
                 label_ids_list.append(getattr(sample, 'label_ids', sample.input_ids))
+                
+                # Include audio features if available
+                if hasattr(sample, 'audio_waveforms_concat') and sample.audio_waveforms_concat is not None:
+                    audio_waveforms_concat_list.append(sample.audio_waveforms_concat)
+                else:
+                    audio_waveforms_concat_list.append(torch.tensor([]))
+                    
+                if hasattr(sample, 'audio_waveforms_start') and sample.audio_waveforms_start is not None:
+                    audio_waveforms_start_list.append(sample.audio_waveforms_start)
+                else:
+                    audio_waveforms_start_list.append(torch.tensor([], dtype=torch.long))
+                    
+                if hasattr(sample, 'audio_sample_rate') and sample.audio_sample_rate is not None:
+                    audio_sample_rate_list.append(sample.audio_sample_rate)
+                else:
+                    audio_sample_rate_list.append(torch.tensor([], dtype=torch.float32))
+                    
+                if hasattr(sample, 'audio_speaker_indices') and sample.audio_speaker_indices is not None:
+                    audio_speaker_indices_list.append(sample.audio_speaker_indices)
+                else:
+                    audio_speaker_indices_list.append(torch.tensor([], dtype=torch.long))
 
             max_len = max(len(ids) for ids in input_ids_list)
             padded_input_ids, padded_attention_mask, padded_label_ids = [], [], []
+            padded_audio_waveforms_concat, padded_audio_waveforms_start = [], []
+            padded_audio_sample_rate, padded_audio_speaker_indices = [], []
 
             for i in range(len(input_ids_list)):
                 pad_len = max_len - len(input_ids_list[i])
                 padded_input_ids.append(torch.cat([input_ids_list[i], torch.full((pad_len,), self.pad_token_id, dtype=torch.long)]))
                 padded_attention_mask.append(torch.cat([attention_mask_list[i], torch.zeros(pad_len, dtype=torch.long)]))
                 padded_label_ids.append(torch.cat([label_ids_list[i], torch.full((pad_len,), -100, dtype=torch.long)]))
+                
+                # Pad audio features to match batch size
+                # For now, we'll just pass through what we have without complex padding
+                if i < len(audio_waveforms_concat_list):
+                    padded_audio_waveforms_concat.append(audio_waveforms_concat_list[i])
+                    padded_audio_waveforms_start.append(audio_waveforms_start_list[i])
+                    padded_audio_sample_rate.append(audio_sample_rate_list[i])
+                    padded_audio_speaker_indices.append(audio_speaker_indices_list[i])
+
+            # Create audio features tensor if we have audio data
+            audio_features = None
+            audio_feature_attention_mask = None
+            if any(len(wav) > 0 for wav in audio_waveforms_concat_list):
+                # We have some audio data, create a simple audio_features tensor
+                audio_features = torch.stack(audio_waveforms_concat_list) if all(len(wav) > 0 for wav in audio_waveforms_concat_list) else None
+                # For now, we'll set audio_features to None in fallback mode since we don't have Whisper processing
+                audio_features = None
+                audio_feature_attention_mask = None
 
             return ExtendedHiggsAudioBatchInput(
                 input_ids=torch.stack(padded_input_ids),
                 attention_mask=torch.stack(padded_attention_mask),
                 label_ids=torch.stack(padded_label_ids),
-                audio_features=None, audio_feature_attention_mask=None,
-                audio_out_ids=None, audio_out_ids_start=None, audio_out_ids_start_group_loc=None,
-                audio_in_ids=None, audio_in_ids_start=None, label_audio_ids=None, reward=None,
+                audio_features=audio_features, 
+                audio_feature_attention_mask=audio_feature_attention_mask,
+                audio_out_ids=None, 
+                audio_out_ids_start=None, 
+                audio_out_ids_start_group_loc=None,
+                audio_in_ids=None, 
+                audio_in_ids_start=None, 
+                label_audio_ids=None, 
+                reward=None,
+                # Include audio conditioning data
+                audio_waveforms_concat=audio_waveforms_concat_list[0] if audio_waveforms_concat_list else None,
+                audio_waveforms_start=audio_waveforms_start_list[0] if audio_waveforms_start_list else None,
+                audio_sample_rate=audio_sample_rate_list[0] if audio_sample_rate_list else None,
+                audio_speaker_indices=audio_speaker_indices_list[0] if audio_speaker_indices_list else None,
             )
 
 def normalize_chinese_punctuation(text):
