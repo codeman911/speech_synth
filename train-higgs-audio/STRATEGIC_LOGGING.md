@@ -24,6 +24,27 @@ python train_v2_ddp.py \
   [other arguments...]
 ```
 
+### Viewing Logs
+
+The strategic logs will be visible in the training output with a timestamp prefix:
+
+```
+[2023-08-15 14:32:45] STRATEGIC LOG:
+=== Zero-Shot Voice Cloning Training Log - Step 100 ===
+...
+```
+
+If you want to save the logs to a file, you can redirect stderr:
+
+```bash
+python train_v2_ddp.py \
+  --model_path /path/to/model \
+  --train_data_file /path/to/data.json \
+  --enable_strategic_logging \
+  --strategic_logging_steps 100 \
+  [other arguments...] 2>&1 | tee training_log.txt
+```
+
 ### Command Line Arguments
 
 - `--enable_strategic_logging`: Enable strategic logging for zero-shot voice cloning training

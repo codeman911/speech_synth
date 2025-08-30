@@ -87,3 +87,13 @@ This implementation will help diagnose the current training issues by:
 4. **Measuring Zero-Shot Capabilities**: Quantifying the model's voice cloning performance
 
 The modular design allows for selective enablement of logging components based on specific debugging needs, while the integration with the existing Trainer callback system ensures minimal disruption to the training pipeline.
+
+## Log Visibility
+
+To ensure the strategic logs are visible during training, the implementation now prints logs to stderr with a timestamp prefix. This makes it easy to identify strategic logging output even when there's a progress bar or other output.
+
+To save logs to a file, you can redirect stderr:
+
+```bash
+python train_v2_ddp.py [arguments] 2>&1 | tee training_log.txt
+```

@@ -1,13 +1,10 @@
-"""
-Strategic Logging Callbacks for Zero-Shot Voice Cloning Training
-Provides transparency into the Higgs Audio training process without disrupting workflow.
-"""
-
 import logging
 import torch
 from transformers import TrainerCallback
 from typing import Dict, Any, Optional
 import json
+import sys
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +88,11 @@ class InputLoggerCallback(TrainerCallback):
                 log_lines.append(f"├── Audio Waveforms Shape: {model_inputs.audio_waveforms_concat.shape}")
             
             # Print the log
-            logger.info("\n".join(log_lines))
+            log_output = "\n".join(log_lines)
+            logger.info(log_output)
+            # Also print to stderr to ensure visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG:\n{log_output}", file=sys.stderr)
+            sys.stderr.flush()
             
         except Exception as e:
             logger.warning(f"Error in InputLoggerCallback: {str(e)}")
@@ -195,7 +196,11 @@ class OutputLoggerCallback(TrainerCallback):
                     log_lines.append(f"├── Audio Token Accuracy: {audio_accuracy:.2%} ({audio_correct}/{audio_total})")
             
             # Print the log
-            logger.info("\n".join(log_lines))
+            log_output = "\n".join(log_lines)
+            logger.info(log_output)
+            # Also print to stderr to ensure visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG:\n{log_output}", file=sys.stderr)
+            sys.stderr.flush()
             
         except Exception as e:
             logger.warning(f"Error in OutputLoggerCallback: {str(e)}")
@@ -251,7 +256,11 @@ class SharedAttentionLoggerCallback(TrainerCallback):
                 log_lines.append("└── Basic verification only")
             
             # Print the log
-            logger.info("\n".join(log_lines))
+            log_output = "\n".join(log_lines)
+            logger.info(log_output)
+            # Also print to stderr to ensure visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG:\n{log_output}", file=sys.stderr)
+            sys.stderr.flush()
             
         except Exception as e:
             logger.warning(f"Error in SharedAttentionLoggerCallback: {str(e)}")
@@ -324,7 +333,11 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
             log_lines.append("└── Overall Zero-Shot Score: CALCULATION NEEDED")
             
             # Print the log
-            logger.info("\n".join(log_lines))
+            log_output = "\n".join(log_lines)
+            logger.info(log_output)
+            # Also print to stderr to ensure visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG:\n{log_output}", file=sys.stderr)
+            sys.stderr.flush()
             
         except Exception as e:
             logger.warning(f"Error in ZeroShotVerificationLoggerCallback: {str(e)}")
