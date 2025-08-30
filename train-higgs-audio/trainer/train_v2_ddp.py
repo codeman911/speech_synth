@@ -680,6 +680,27 @@ class HiggsAudioTrainer(Trainer):
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
         
+    def training_step(self, model, inputs):
+        """
+        Perform a training step and pass inputs/outputs to callbacks.
+        This override allows strategic logging callbacks to access model data.
+        """
+        # Call the parent training step to get loss and outputs
+        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+        
+        # Call the callbacks with inputs and outputs
+        # This is the key fix - we need to manually pass the data to callbacks
+        if self.callback_handler:
+            # Create a copy of the inputs to avoid modifying the original
+            callback_kwargs = {
+                'inputs': inputs,
+                'outputs': outputs,
+                'model': model
+            }
+            self.callback_handler.call_event("on_step_end", self.args, self.state, self.control, **callback_kwargs)
+        
+        return loss
+        
     def evaluation_loop(self, dataloader, description, prediction_loss_only=None, ignore_keys=None, metric_key_prefix="eval"):
         """
         Custom evaluation loop that ensures eval_loss is computed and returned

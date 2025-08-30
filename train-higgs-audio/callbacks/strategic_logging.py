@@ -36,7 +36,7 @@ class InputLoggerCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.log_every_n_steps = log_every_n_steps
         
-    def on_log(self, args, state, control, logs=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
         """Log input sequence analysis and tensor details"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
@@ -54,21 +54,21 @@ class InputLoggerCallback(TrainerCallback):
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received args type: {type(args)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received state type: {type(state)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received control type: {type(control)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received logs type: {type(logs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received kwargs keys: {list(kwargs.keys())}", file=sys.stderr)
-            if logs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Logs content: {list(logs.keys())}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received inputs type: {type(inputs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received outputs type: {type(outputs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received model type: {type(model)}", file=sys.stderr)
+            if inputs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
+            if outputs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: outputs keys: {list(outputs.keys()) if hasattr(outputs, 'keys') else 'no keys'}", file=sys.stderr)
             sys.stderr.flush()
             
-        # Get model inputs from kwargs
-        model_inputs = kwargs.get('inputs', {})
+        # Get model inputs
+        model_inputs = inputs if inputs is not None else {}
         if not model_inputs:
             # Log that we didn't get inputs for debugging
             if state.global_step == 1:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: No inputs received at step {state.global_step}", file=sys.stderr)
-                # Check if inputs might be in logs or elsewhere
-                if logs:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Available in logs: {list(logs.keys())}", file=sys.stderr)
                 sys.stderr.flush()
             return
             
@@ -167,7 +167,7 @@ class OutputLoggerCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.log_every_n_steps = log_every_n_steps
         
-    def on_log(self, args, state, control, logs=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
         """Log model outputs and comparisons"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
@@ -178,16 +178,19 @@ class OutputLoggerCallback(TrainerCallback):
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received args type: {type(args)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received state type: {type(state)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received control type: {type(control)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received logs type: {type(logs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received kwargs keys: {list(kwargs.keys())}", file=sys.stderr)
-            if logs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Logs content: {list(logs.keys())}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received inputs type: {type(inputs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received outputs type: {type(outputs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received model type: {type(model)}", file=sys.stderr)
+            if inputs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
+            if outputs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: outputs keys: {list(outputs.keys()) if hasattr(outputs, 'keys') else 'no keys'}", file=sys.stderr)
             sys.stderr.flush()
             
         try:
             # Get model outputs and labels
-            model_outputs = kwargs.get('outputs', {})
-            model_inputs = kwargs.get('inputs', {})
+            model_outputs = outputs if outputs is not None else {}
+            model_inputs = inputs if inputs is not None else {}
             
             # Debug: Check if we have outputs at step 1
             if state.global_step == 1:
@@ -204,10 +207,12 @@ class OutputLoggerCallback(TrainerCallback):
             log_lines.append(f"=== Model Output Analysis - Step {state.global_step} ===")
             
             # Loss information
-            if logs and 'loss' in logs:
-                log_lines.append(f"├── Loss: {logs['loss']:.4f}")
-            if logs and 'grad_norm' in logs:
-                log_lines.append(f"├── Gradient Norm: {logs['grad_norm']:.6f}")
+            if hasattr(model_outputs, 'loss') and model_outputs.loss is not None:
+                if torch.is_tensor(model_outputs.loss):
+                    loss_value = model_outputs.loss.item() if model_outputs.loss.numel() == 1 else model_outputs.loss.mean().item()
+                else:
+                    loss_value = float(model_outputs.loss)
+                log_lines.append(f"├── Loss: {loss_value:.4f}")
             
             # Text token analysis
             log_lines.append("Text Token Analysis:")
@@ -308,16 +313,15 @@ class SharedAttentionLoggerCallback(TrainerCallback):
     def __init__(self, log_every_n_steps=100):
         self.log_every_n_steps = log_every_n_steps
         
-    def on_log(self, args, state, control, logs=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
         """Log shared attention verification"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
         try:
-            # Get model from kwargs
-            model = kwargs.get('model')
-            if not model or not hasattr(model, 'model'):
+            # Get model
+            if model is None:
                 # Log that we didn't get model for debugging
                 if state.global_step == 1:
                     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: No model received at step {state.global_step}", file=sys.stderr)
@@ -375,7 +379,7 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
     def __init__(self, log_every_n_steps=100):
         self.log_every_n_steps = log_every_n_steps
         
-    def on_log(self, args, state, control, logs=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
         """Log zero-shot voice cloning verification"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
@@ -386,15 +390,18 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received args type: {type(args)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received state type: {type(state)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received control type: {type(control)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received logs type: {type(logs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received kwargs keys: {list(kwargs.keys())}", file=sys.stderr)
-            if logs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Logs content: {list(logs.keys())}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received inputs type: {type(inputs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received outputs type: {type(outputs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received model type: {type(model)}", file=sys.stderr)
+            if inputs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
+            if outputs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: outputs keys: {list(outputs.keys()) if hasattr(outputs, 'keys') else 'no keys'}", file=sys.stderr)
             sys.stderr.flush()
             
         try:
             # Get model inputs
-            model_inputs = kwargs.get('inputs', {})
+            model_inputs = inputs if inputs is not None else {}
             
             # Debug: Check what we have at step 1
             if state.global_step == 1:
@@ -422,9 +429,9 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                     log_lines.append("├── Audio Waveforms (Fallback): ❌ NOT FOUND")
             
             # Check for encode_whisper_embed flag
-            model = kwargs.get('model')
-            if model and hasattr(model, 'model') and hasattr(model.model, 'config'):
-                encode_whisper = getattr(model.model.config, 'encode_whisper_embed', False)
+            higgs_model = model.model if hasattr(model, 'model') else model
+            if higgs_model and hasattr(higgs_model, 'config'):
+                encode_whisper = getattr(higgs_model.config, 'encode_whisper_embed', False)
                 log_lines.append(f"├── Config encode_whisper_embed: {'✅ ENABLED' if encode_whisper else '❌ DISABLED'}")
             else:
                 log_lines.append("├── Config encode_whisper_embed: ❌ NOT ACCESSIBLE")
@@ -445,8 +452,8 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
             if hasattr(model_inputs, 'input_ids') and model_inputs.input_ids is not None:
                 input_ids = model_inputs.input_ids
                 # Check for special tokens that indicate proper ChatML structure
-                audio_in_token_id = getattr(model.model.config if model else None, 'audio_in_token_idx', 128015)
-                audio_out_token_id = getattr(model.model.config if model else None, 'audio_out_token_idx', 128016)
+                audio_in_token_id = getattr(higgs_model.config if higgs_model else None, 'audio_in_token_idx', 128015)
+                audio_out_token_id = getattr(higgs_model.config if higgs_model else None, 'audio_out_token_idx', 128016)
                 
                 audio_in_count = (input_ids == audio_in_token_id).sum().item()
                 audio_out_count = (input_ids == audio_out_token_id).sum().item()
