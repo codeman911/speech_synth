@@ -691,11 +691,10 @@ class HiggsAudioTrainer(Trainer):
         # Call the callbacks with inputs and outputs
         # This is the key fix - we need to manually pass the data to callbacks
         if self.callback_handler:
-            # Create a copy of the inputs to avoid modifying the original
+            # Create callback kwargs without model to avoid conflicts with default callbacks
             callback_kwargs = {
                 'inputs': inputs,
-                'outputs': outputs,
-                'model': model
+                'outputs': outputs
             }
             self.callback_handler.call_event("on_step_end", self.args, self.state, self.control, **callback_kwargs)
         

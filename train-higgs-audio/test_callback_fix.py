@@ -29,21 +29,6 @@ def test_callback_fix():
         print("Testing strategic logging callback fix...")
         
         # Create mock data that simulates what would be passed from the trainer
-        class MockModel:
-            def __init__(self):
-                self.config = type('Config', (), {
-                    'audio_in_token_idx': 128015,
-                    'audio_out_token_idx': 128016,
-                    'encode_whisper_embed': True
-                })()
-                
-            class model:
-                config = type('Config', (), {
-                    'audio_in_token_idx': 128015,
-                    'audio_out_token_idx': 128016,
-                    'encode_whisper_embed': True
-                })()
-        
         class MockInputs:
             def __init__(self):
                 self.input_ids = torch.randint(0, 1000, (2, 50))
@@ -82,7 +67,6 @@ def test_callback_fix():
         # Create mock data
         mock_inputs = MockInputs()
         mock_outputs = MockOutputs()
-        mock_model = MockModel()
         mock_state = MockState()
         mock_args = MockArgs()
         
@@ -92,8 +76,7 @@ def test_callback_fix():
             state=mock_state,
             control=control,
             inputs=mock_inputs,
-            outputs=mock_outputs,
-            model=mock_model
+            outputs=mock_outputs
         )
         
         print("Testing OutputLoggerCallback...")
@@ -102,8 +85,7 @@ def test_callback_fix():
             state=mock_state,
             control=control,
             inputs=mock_inputs,
-            outputs=mock_outputs,
-            model=mock_model
+            outputs=mock_outputs
         )
         
         print("Testing SharedAttentionLoggerCallback...")
@@ -112,8 +94,7 @@ def test_callback_fix():
             state=mock_state,
             control=control,
             inputs=mock_inputs,
-            outputs=mock_outputs,
-            model=mock_model
+            outputs=mock_outputs
         )
         
         print("Testing ZeroShotVerificationLoggerCallback...")
@@ -122,8 +103,7 @@ def test_callback_fix():
             state=mock_state,
             control=control,
             inputs=mock_inputs,
-            outputs=mock_outputs,
-            model=mock_model
+            outputs=mock_outputs
         )
         
         print("\n✅ All callbacks executed successfully!")

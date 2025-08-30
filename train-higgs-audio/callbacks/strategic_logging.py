@@ -36,7 +36,7 @@ class InputLoggerCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.log_every_n_steps = log_every_n_steps
         
-    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, **kwargs):
         """Log input sequence analysis and tensor details"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
@@ -56,7 +56,6 @@ class InputLoggerCallback(TrainerCallback):
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received control type: {type(control)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received inputs type: {type(inputs)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received outputs type: {type(outputs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received model type: {type(model)}", file=sys.stderr)
             if inputs:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
             if outputs:
@@ -167,7 +166,7 @@ class OutputLoggerCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.log_every_n_steps = log_every_n_steps
         
-    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, **kwargs):
         """Log model outputs and comparisons"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
@@ -180,7 +179,6 @@ class OutputLoggerCallback(TrainerCallback):
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received control type: {type(control)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received inputs type: {type(inputs)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received outputs type: {type(outputs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received model type: {type(model)}", file=sys.stderr)
             if inputs:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
             if outputs:
@@ -313,48 +311,28 @@ class SharedAttentionLoggerCallback(TrainerCallback):
     def __init__(self, log_every_n_steps=100):
         self.log_every_n_steps = log_every_n_steps
         
-    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, **kwargs):
         """Log shared attention verification"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
         try:
-            # Get model
-            if model is None:
-                # Log that we didn't get model for debugging
-                if state.global_step == 1:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: No model received at step {state.global_step}", file=sys.stderr)
-                    sys.stderr.flush()
-                return
-                
             # Create prettified log
             log_lines = []
             log_lines.append(f"=== Shared Attention Verification - Step {state.global_step} ===")
             
-            # Check for DualFFN layers
-            higgs_model = model.model if hasattr(model, 'model') else model
-            if hasattr(higgs_model, 'text_model') and hasattr(higgs_model.text_model, 'layers'):
-                layers = higgs_model.text_model.layers
-                log_lines.append(f"├── Model Layers: {len(layers)}")
-                
-                # Check for audio FFN in DualFFN layers
-                dual_ffn_layers = getattr(higgs_model.config, 'audio_dual_ffn_layers', [])
-                log_lines.append(f"├── DualFFN Layers: {dual_ffn_layers}")
-                
-                # Analyze attention patterns (simplified)
-                log_lines.append("├── Attention Pattern Analysis:")
-                log_lines.append("│   ├── Text-to-Audio Cross Attention: VERIFICATION NEEDED")
-                log_lines.append("│   ├── Audio-to-Text Cross Attention: VERIFICATION NEEDED")
-                log_lines.append("│   └── Shared Attention Weights: VERIFICATION NEEDED")
-                
-                # Gradient flow analysis placeholder
-                log_lines.append("├── Gradient Flow Status: HEALTHY (assumed)")
-                log_lines.append("├── Text Layer Activation: NORMAL (assumed)")
-                log_lines.append("└── Audio Layer Activation: NORMAL (assumed)")
-            else:
-                log_lines.append("├── Model structure not accessible for detailed analysis")
-                log_lines.append("└── Basic verification only")
+            # Check for DualFFN layers (we can't access the model directly here)
+            log_lines.append("├── Model structure analysis: LIMITED (model not directly accessible)")
+            log_lines.append("├── Attention Pattern Analysis:")
+            log_lines.append("│   ├── Text-to-Audio Cross Attention: VERIFICATION NEEDED")
+            log_lines.append("│   ├── Audio-to-Text Cross Attention: VERIFICATION NEEDED")
+            log_lines.append("│   └── Shared Attention Weights: VERIFICATION NEEDED")
+            
+            # Gradient flow analysis placeholder
+            log_lines.append("├── Gradient Flow Status: HEALTHY (assumed)")
+            log_lines.append("├── Text Layer Activation: NORMAL (assumed)")
+            log_lines.append("└── Audio Layer Activation: NORMAL (assumed)")
             
             # Print the log
             log_output = "\n".join(log_lines)
@@ -379,7 +357,7 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
     def __init__(self, log_every_n_steps=100):
         self.log_every_n_steps = log_every_n_steps
         
-    def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
+    def on_step_end(self, args, state, control, inputs=None, outputs=None, **kwargs):
         """Log zero-shot voice cloning verification"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
@@ -392,7 +370,6 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received control type: {type(control)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received inputs type: {type(inputs)}", file=sys.stderr)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received outputs type: {type(outputs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received model type: {type(model)}", file=sys.stderr)
             if inputs:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
             if outputs:
@@ -428,14 +405,6 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                 else:
                     log_lines.append("├── Audio Waveforms (Fallback): ❌ NOT FOUND")
             
-            # Check for encode_whisper_embed flag
-            higgs_model = model.model if hasattr(model, 'model') else model
-            if higgs_model and hasattr(higgs_model, 'config'):
-                encode_whisper = getattr(higgs_model.config, 'encode_whisper_embed', False)
-                log_lines.append(f"├── Config encode_whisper_embed: {'✅ ENABLED' if encode_whisper else '❌ DISABLED'}")
-            else:
-                log_lines.append("├── Config encode_whisper_embed: ❌ NOT ACCESSIBLE")
-            
             # Audio token conditioning
             if hasattr(model_inputs, 'audio_in_ids') and model_inputs.audio_in_ids is not None:
                 log_lines.append("├── DAC Code Conditioning: ✅ PRESENT")
@@ -451,9 +420,9 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
             log_lines.append("ChatML Structure Verification:")
             if hasattr(model_inputs, 'input_ids') and model_inputs.input_ids is not None:
                 input_ids = model_inputs.input_ids
-                # Check for special tokens that indicate proper ChatML structure
-                audio_in_token_id = getattr(higgs_model.config if higgs_model else None, 'audio_in_token_idx', 128015)
-                audio_out_token_id = getattr(higgs_model.config if higgs_model else None, 'audio_out_token_idx', 128016)
+                # We can't access the model config here, so we'll use common values
+                audio_in_token_id = 128015  # Common value for Higgs Audio
+                audio_out_token_id = 128016  # Common value for Higgs Audio
                 
                 audio_in_count = (input_ids == audio_in_token_id).sum().item()
                 audio_out_count = (input_ids == audio_out_token_id).sum().item()
