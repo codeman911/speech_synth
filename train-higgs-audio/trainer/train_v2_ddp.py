@@ -58,7 +58,7 @@ except ImportError:
 
 # Import strategic logging callbacks
 try:
-    from .strategic_logging_callbacks import InputLoggerCallback, OutputLoggerCallback, SharedAttentionLoggerCallback, ZeroShotVerificationLoggerCallback
+    from callbacks.strategic_logging import InputLoggerCallback, OutputLoggerCallback, SharedAttentionLoggerCallback, ZeroShotVerificationLoggerCallback
     LOGGING_CALLBACKS_AVAILABLE = True
 except ImportError:
     LOGGING_CALLBACKS_AVAILABLE = False
