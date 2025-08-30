@@ -169,6 +169,7 @@ class ExtendedHiggsAudioSampleCollator:
             input_ids_list, attention_mask_list, label_ids_list = [], [], []
             audio_waveforms_concat_list, audio_waveforms_start_list = [], []
             audio_sample_rate_list, audio_speaker_indices_list = [], []
+            audio_ids_concat_list, audio_ids_start_list = [], []
             
             for sample in batch:
                 input_ids_list.append(sample.input_ids)
@@ -195,11 +196,23 @@ class ExtendedHiggsAudioSampleCollator:
                     audio_speaker_indices_list.append(sample.audio_speaker_indices)
                 else:
                     audio_speaker_indices_list.append(torch.tensor([], dtype=torch.long))
+                    
+                # Include audio tokens if available
+                if hasattr(sample, 'audio_ids_concat') and sample.audio_ids_concat is not None:
+                    audio_ids_concat_list.append(sample.audio_ids_concat)
+                else:
+                    audio_ids_concat_list.append(torch.zeros((8, 0), dtype=torch.long))
+                    
+                if hasattr(sample, 'audio_ids_start') and sample.audio_ids_start is not None:
+                    audio_ids_start_list.append(sample.audio_ids_start)
+                else:
+                    audio_ids_start_list.append(torch.tensor([0], dtype=torch.long))
 
             max_len = max(len(ids) for ids in input_ids_list)
             padded_input_ids, padded_attention_mask, padded_label_ids = [], [], []
             padded_audio_waveforms_concat, padded_audio_waveforms_start = [], []
             padded_audio_sample_rate, padded_audio_speaker_indices = [], []
+            padded_audio_ids_concat, padded_audio_ids_start = [], []
 
             for i in range(len(input_ids_list)):
                 pad_len = max_len - len(input_ids_list[i])
@@ -213,6 +226,8 @@ class ExtendedHiggsAudioSampleCollator:
                     padded_audio_waveforms_start.append(audio_waveforms_start_list[i])
                     padded_audio_sample_rate.append(audio_sample_rate_list[i])
                     padded_audio_speaker_indices.append(audio_speaker_indices_list[i])
+                    padded_audio_ids_concat.append(audio_ids_concat_list[i])
+                    padded_audio_ids_start.append(audio_ids_start_list[i])
 
             # Create audio features tensor if we have audio data and Whisper processor
             audio_features = None
@@ -241,8 +256,27 @@ class ExtendedHiggsAudioSampleCollator:
                                 sampling_rate=16000, 
                                 return_tensors="pt"
                             )
-                            processed_features.append(processed.input_features.squeeze(0))
-                            attention_masks.append(processed.attention_mask.squeeze(0) if hasattr(processed, 'attention_mask') and processed.attention_mask is not None else torch.ones(processed.input_features.shape[-1], dtype=torch.long))
+                            # Handle the case where input_features might be nested
+                            if hasattr(processed, 'input_features'):
+                                features = processed.input_features
+                            else:
+                                # If it's a dict-like object
+                                features = processed['input_features']
+                            
+                            # Squeeze to remove extra dimensions if needed
+                            if features.dim() > 2:
+                                features = features.squeeze(0)
+                            processed_features.append(features)
+                            
+                            # Create attention mask
+                            if hasattr(processed, 'attention_mask') and processed.attention_mask is not None:
+                                mask = processed.attention_mask
+                                if mask.dim() > 1:
+                                    mask = mask.squeeze(0)
+                                attention_masks.append(mask)
+                            else:
+                                # Create a default attention mask
+                                attention_masks.append(torch.ones(features.shape[-1], dtype=torch.long))
                     
                     if processed_features:
                         # Stack the processed features
@@ -270,6 +304,9 @@ class ExtendedHiggsAudioSampleCollator:
                 audio_waveforms_start=padded_audio_waveforms_start[0] if padded_audio_waveforms_start else torch.tensor([], dtype=torch.long),
                 audio_sample_rate=padded_audio_sample_rate[0] if padded_audio_sample_rate else torch.tensor([], dtype=torch.float32),
                 audio_speaker_indices=padded_audio_speaker_indices[0] if padded_audio_speaker_indices else torch.tensor([], dtype=torch.long),
+                # Include audio tokens
+                audio_ids_concat=padded_audio_ids_concat[0] if padded_audio_ids_concat else torch.zeros((8, 0), dtype=torch.long),
+                audio_ids_start=padded_audio_ids_start[0] if padded_audio_ids_start else torch.tensor([0], dtype=torch.long),
             )
 
 def normalize_chinese_punctuation(text):
@@ -445,68 +482,6 @@ class ZeroShotVoiceCloningDataset(Dataset):
             logger.error(f"Error processing ChatML sample: {e}")
             return None, None, None, None
 
-    def _prepare_generation_context(self, ref_text: str, ref_audio_path: str) -> tuple:
-        """
-        Prepare generation context following the inference script pattern.
-        This creates the proper message structure for zero-shot voice cloning.
-        
-        Args:
-            ref_text: Reference text
-            ref_audio_path: Reference audio path (already resolved)
-            
-        Returns:
-            Tuple of (messages, audio_ids)
-        """
-        # Create system message
-        system_message = Message(
-            role="system",
-            content="Generate speech in the provided voice."
-        )
-        
-        # Load and encode reference audio
-        logger.debug(f"Loading reference audio waveform: {ref_audio_path}")
-        if not os.path.exists(ref_audio_path):
-            logger.error(f"Reference audio file not found: {ref_audio_path}")
-            return [], []
-            
-        try:
-            # Load audio waveform
-            waveform, sr = torchaudio.load(ref_audio_path)
-            logger.debug(f"Loaded audio: shape={waveform.shape}, sr={sr}")
-            
-            # Convert to mono if stereo
-            if waveform.shape[0] > 1:
-                waveform = waveform.mean(dim=0, keepdim=True)
-                logger.debug(f"Converted to mono: shape={waveform.shape}")
-            
-            # Encode reference audio for DAC tokens
-            audio_tokens = self._encode_audio_tokens(ref_audio_path)
-            audio_ids = [audio_tokens] if audio_tokens is not None else []
-            if audio_tokens is not None:
-                logger.debug(f"Audio tokens shape: {audio_tokens.shape}")
-            
-        except Exception as e:
-            logger.error(f"Error loading audio: {e}")
-            return [], []
-        
-        # CRITICAL: Follow generation.py pattern for voice prompting
-        # Create user message with reference text (no audio token here)
-        user_ref_message = Message(
-            role="user",
-            content=ref_text
-        )
-        
-        # CRITICAL: Assistant responds with AudioContent, not text
-        # This is the key difference from the previous broken implementation
-        assistant_ref_message = Message(
-            role="assistant",
-            content=AudioContent(audio_url=ref_audio_path)
-        )
-        
-        messages = [system_message, user_ref_message, assistant_ref_message]
-        
-        return messages, audio_ids
-
     def __len__(self) -> int:
         return len(self.samples)
 
@@ -644,7 +619,68 @@ class ZeroShotVoiceCloningDataset(Dataset):
             logger.error(f"Error processing sample at index {idx}: {e}", exc_info=True)
             # Return next sample to avoid interrupting training
             return self.__getitem__((idx + 1) % len(self))
-
+            
+    def _prepare_generation_context(self, ref_text: str, ref_audio_path: str) -> tuple:
+        """
+        Prepare generation context following the inference script pattern.
+        This creates the proper message structure for zero-shot voice cloning.
+        
+        Args:
+            ref_text: Reference text
+            ref_audio_path: Reference audio path (already resolved)
+            
+        Returns:
+            Tuple of (messages, audio_ids)
+        """
+        # Create system message
+        system_message = Message(
+            role="system",
+            content="Generate speech in the provided voice."
+        )
+        
+        # Load and encode reference audio
+        logger.debug(f"Loading reference audio waveform: {ref_audio_path}")
+        if not os.path.exists(ref_audio_path):
+            logger.error(f"Reference audio file not found: {ref_audio_path}")
+            return [], []
+            
+        try:
+            # Load audio waveform
+            waveform, sr = torchaudio.load(ref_audio_path)
+            logger.debug(f"Loaded audio: shape={waveform.shape}, sr={sr}")
+            
+            # Convert to mono if stereo
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+                logger.debug(f"Converted to mono: shape={waveform.shape}")
+            
+            # Encode reference audio for DAC tokens
+            audio_tokens = self._encode_audio_tokens(ref_audio_path)
+            audio_ids = [audio_tokens] if audio_tokens is not None else []
+            if audio_tokens is not None:
+                logger.debug(f"Audio tokens shape: {audio_tokens.shape}")
+            
+        except Exception as e:
+            logger.error(f"Error loading audio: {e}")
+            return [], []
+        
+        # CRITICAL: Follow generation.py pattern for voice prompting
+        # Create user message with reference text (no audio token here)
+        user_ref_message = Message(
+            role="user",
+            content=ref_text
+        )
+        
+        # CRITICAL: Assistant responds with AudioContent, not text
+        # This is the key difference from the previous broken implementation
+        assistant_ref_message = Message(
+            role="assistant",
+            content=AudioContent(audio_url=ref_audio_path)
+        )
+        
+        messages = [system_message, user_ref_message, assistant_ref_message]
+        
+        return messages, audio_ids
 
 class HiggsAudioModelWrapper(nn.Module):
     """Wrapper for Higgs Audio v2 model to enable training"""
@@ -972,7 +1008,7 @@ def main():
         num_train_epochs=args.num_train_epochs,
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
-        learning_rate=args.learning_rate if args.learning_rate > 1e-6 else 5e-5,  # Ensure appropriate learning rate
+        learning_rate=max(args.learning_rate, 1e-6),  # Ensure minimum learning rate
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,

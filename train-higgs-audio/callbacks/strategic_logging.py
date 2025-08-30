@@ -73,13 +73,14 @@ class InputLoggerCallback(TrainerCallback):
                         # Check if input_ids are within valid range for the tokenizer
                         if input_ids.numel() > 0:
                             max_token_id = input_ids.max().item()
+                            min_token_id = input_ids.min().item()
                             vocab_size = len(self.tokenizer)
                             # Validate token IDs before decoding
-                            if max_token_id < vocab_size and max_token_id >= 0:
+                            if max_token_id < vocab_size and min_token_id >= 0:
                                 decoded_text = self.tokenizer.decode(input_ids[0], skip_special_tokens=False)
                                 log_lines.append(f"├── Decoded Text (first sample): {decoded_text[:200]}{'...' if len(decoded_text) > 200 else ''}")
                             else:
-                                log_lines.append(f"├── Decoded Text: Error - token IDs out of range (max: {max_token_id}, vocab_size: {vocab_size})")
+                                log_lines.append(f"├── Decoded Text: Error - token IDs out of range (min: {min_token_id}, max: {max_token_id}, vocab_size: {vocab_size})")
                         else:
                             log_lines.append("├── Decoded Text: Empty input_ids tensor")
                     except Exception as e:
@@ -131,11 +132,22 @@ class InputLoggerCallback(TrainerCallback):
             if hasattr(model_inputs, 'audio_features') and model_inputs.audio_features is not None:
                 log_lines.append("├── Whisper Embedding Status: ✅ ENABLED")
                 log_lines.append(f"├── Audio Features Shape: {model_inputs.audio_features.shape}")
+                # Add statistics for audio features, but handle empty tensors
+                if _import_torch() and isinstance(model_inputs.audio_features, torch.Tensor):
+                    if model_inputs.audio_features.numel() > 0:
+                        log_lines.append(f"│   ├── Min: {model_inputs.audio_features.min().item():.4f}, Max: {model_inputs.audio_features.max().item():.4f}, Mean: {model_inputs.audio_features.mean().item():.4f}")
+                    else:
+                        log_lines.append("│   ├── Tensor is empty")
             else:
                 log_lines.append("├── Whisper Embedding Status: ❌ DISABLED or NOT FOUND")
                 # Check for fallback audio data
                 if hasattr(model_inputs, 'audio_waveforms_concat') and model_inputs.audio_waveforms_concat is not None:
                     log_lines.append(f"├── Audio Waveforms (Fallback): {model_inputs.audio_waveforms_concat.shape if hasattr(model_inputs.audio_waveforms_concat, 'shape') else 'present'}")
+                    if _import_torch() and isinstance(model_inputs.audio_waveforms_concat, torch.Tensor):
+                        if model_inputs.audio_waveforms_concat.numel() > 0:
+                            log_lines.append(f"│   ├── Min: {model_inputs.audio_waveforms_concat.min().item():.4f}, Max: {model_inputs.audio_waveforms_concat.max().item():.4f}, Mean: {model_inputs.audio_waveforms_concat.mean().item():.4f}")
+                        else:
+                            log_lines.append("│   ├── Tensor is empty")
                 if hasattr(model_inputs, 'audio_sample_rate') and model_inputs.audio_sample_rate is not None:
                     log_lines.append(f"├── Audio Sample Rate (Fallback): {model_inputs.audio_sample_rate.shape if hasattr(model_inputs.audio_sample_rate, 'shape') else 'present'}")
             
@@ -211,13 +223,14 @@ class OutputLoggerCallback(TrainerCallback):
                             if predicted_tokens.numel() > 0:
                                 # Check if predicted tokens are within valid range for the tokenizer
                                 max_token_id = predicted_tokens.max().item()
+                                min_token_id = predicted_tokens.min().item()
                                 vocab_size = len(self.tokenizer)
                                 # Validate token IDs before decoding
-                                if max_token_id < vocab_size and max_token_id >= 0:
+                                if max_token_id < vocab_size and min_token_id >= 0:
                                     decoded_predictions = self.tokenizer.decode(predicted_tokens[0], skip_special_tokens=False)
                                     log_lines.append(f"├── Predicted Text (first sample): {decoded_predictions[:200]}{'...' if len(decoded_predictions) > 200 else ''}")
                                 else:
-                                    log_lines.append(f"├── Predicted Text: Error - token IDs out of range (max: {max_token_id}, vocab_size: {vocab_size})")
+                                    log_lines.append(f"├── Predicted Text: Error - token IDs out of range (min: {min_token_id}, max: {max_token_id}, vocab_size: {vocab_size})")
                             else:
                                 log_lines.append("├── Predicted Text: Empty predicted tokens tensor")
                         else:
@@ -292,14 +305,15 @@ class OutputLoggerCallback(TrainerCallback):
                         if label_ids.numel() > 0:
                             # Check if label_ids are within valid range for the tokenizer
                             max_token_id = label_ids.max().item()
+                            min_token_id = label_ids.min().item()
                             vocab_size = len(self.tokenizer)
                             # Validate token IDs before decoding
-                            if max_token_id < vocab_size and max_token_id >= 0:
+                            if max_token_id < vocab_size and min_token_id >= 0:
                                 # Decode a sample (first sequence in batch)
                                 decoded_labels = self.tokenizer.decode(label_ids[0], skip_special_tokens=False)
                                 log_lines.append(f"├── Ground Truth Text (first sample): {decoded_labels[:200]}{'...' if len(decoded_labels) > 200 else ''}")
                             else:
-                                log_lines.append(f"├── Ground Truth Text: Error - token IDs out of range (max: {max_token_id}, vocab_size: {vocab_size})")
+                                log_lines.append(f"├── Ground Truth Text: Error - token IDs out of range (min: {min_token_id}, max: {max_token_id}, vocab_size: {vocab_size})")
                         else:
                             log_lines.append("├── Ground Truth Text: Empty label_ids tensor")
                     except Exception as e:
