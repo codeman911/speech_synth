@@ -11,8 +11,9 @@ This document summarizes all the fixes and improvements made to enable proper st
 - **Wrong callback method**: Callbacks were using `on_log` instead of `on_step_end`
 - **No data passing mechanism**: Trainer was not passing model inputs/outputs to callbacks
 
-### 2. Runtime Error
+### 2. Runtime Errors
 - **Method signature mismatch**: `TypeError: HiggsAudioTrainer.training_step() takes 3 positional arguments but 4 were given`
+- **Parameter conflicts**: `TypeError: transformers.trainer_callback.DefaultFlowCallback.on_step_end() got multiple values for keyword argument 'model'`
 
 ## Solutions Implemented
 
@@ -25,12 +26,11 @@ This document summarizes all the fixes and improvements made to enable proper st
       # Get loss and outputs from compute_loss
       loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
       
-      # Pass data to callbacks via on_step_end
+      # Pass data to callbacks via on_step_end (without model to avoid conflicts)
       if self.callback_handler:
           callback_kwargs = {
               'inputs': inputs,
-              'outputs': outputs,
-              'model': model
+              'outputs': outputs
           }
           self.callback_handler.call_event("on_step_end", self.args, self.state, self.control, **callback_kwargs)
       
@@ -39,21 +39,21 @@ This document summarizes all the fixes and improvements made to enable proper st
 
 #### File: `callbacks/strategic_logging.py`
 - **Changed all callbacks from `on_log` to `on_step_end`**
-- **Updated method signatures** to accept model data:
+- **Updated method signatures** to accept model data without conflicting with default callbacks:
   ```python
-  def on_step_end(self, args, state, control, inputs=None, outputs=None, model=None, **kwargs):
+  def on_step_end(self, args, state, control, inputs=None, outputs=None, **kwargs):
   ```
 - **Enhanced debugging output** at step 1 to show received data
 
 ## Files Modified
 
 ### Primary Implementation Files
-1. `trainer/train_v2_ddp.py` - Added `training_step` override with proper signature
-2. `callbacks/strategic_logging.py` - Updated all callbacks to use `on_step_end` and handle model data
+1. `trainer/train_v2_ddp.py` - Added `training_step` override with proper signature and no parameter conflicts
+2. `callbacks/strategic_logging.py` - Updated all callbacks to use `on_step_end` and handle model data without conflicts
 
 ### Validation and Testing Files
 1. `validate_syntax_fix.py` - Syntax validation script
-2. `validate_training_step_fix.py` - Specific validation for training_step signature
+2. `validate_training_step_fix.py` - Specific validation for training_step signature and parameter conflicts
 3. `final_integration_test.py` - Complete integration test
 4. `test_callback_fix.py` - Callback functionality test
 5. `validate_callback_fix.py` - Callback structure validation
@@ -64,8 +64,9 @@ This document summarizes all the fixes and improvements made to enable proper st
 
 ## Expected Results
 
-### Fixed Runtime Error
+### Fixed Runtime Errors
 - ✅ No more `TypeError` about training_step arguments
+- ✅ No more parameter conflicts with default callbacks
 - ✅ Proper method signature matching Hugging Face Trainer interface
 
 ### Enhanced Strategic Logging
@@ -77,7 +78,7 @@ This document summarizes all the fixes and improvements made to enable proper st
 ### Callback Functionality
 - ✅ `InputLoggerCallback` - Analyzes model inputs with tensor shapes and decoded text
 - ✅ `OutputLoggerCallback` - Tracks predictions vs. ground truth with accuracy metrics
-- ✅ `SharedAttentionLoggerCallback` - Verifies DualFFN training with shared attention
+- ✅ `SharedAttentionLoggerCallback` - Verifies training patterns
 - ✅ `ZeroShotVerificationLoggerCallback` - Confirms voice cloning capabilities
 
 ## Validation Results
@@ -114,5 +115,6 @@ The logs will now show detailed information at:
 3. **Performance Monitoring**: Real-time tracking of model accuracy and loss
 4. **Compatibility**: Works with existing Hugging Face Trainer infrastructure
 5. **Non-Intrusive**: Can be enabled/disabled via command line arguments
+6. **No Conflicts**: Properly handles default callbacks without parameter conflicts
 
 This fix resolves the core issues preventing strategic logging from working and provides the detailed insights needed for debugging zero-shot voice cloning training.

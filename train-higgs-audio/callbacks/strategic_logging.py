@@ -44,38 +44,22 @@ class InputLoggerCallback(TrainerCallback):
             
         # Import torch when needed
         if not _import_torch():
-            if state.global_step == 1:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: torch not available", file=sys.stderr)
-                sys.stderr.flush()
             return
             
-        # Debug: Print what we actually receive
-        if state.global_step == 1:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received args type: {type(args)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received state type: {type(state)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received control type: {type(control)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received inputs type: {type(inputs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received outputs type: {type(outputs)}", file=sys.stderr)
-            if inputs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
-            if outputs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: outputs keys: {list(outputs.keys()) if hasattr(outputs, 'keys') else 'no keys'}", file=sys.stderr)
-            sys.stderr.flush()
+        # Handle case where inputs is None
+        if inputs is None:
+            return
             
         # Get model inputs
-        model_inputs = inputs if inputs is not None else {}
+        model_inputs = inputs
         if not model_inputs:
-            # Log that we didn't get inputs for debugging
-            if state.global_step == 1:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: No inputs received at step {state.global_step}", file=sys.stderr)
-                sys.stderr.flush()
             return
             
         try:
             # Create prettified log
             log_lines = []
             log_lines.append(f"=== Zero-Shot Voice Cloning Training Log - Step {state.global_step} ===")
-            log_lines.append(f"Timestamp: {state.log_history[-1].get('epoch', 'N/A') if state.log_history else 'N/A'}")
+            log_lines.append(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             log_lines.append("")
             
             # Input Sequence Analysis
@@ -172,121 +156,107 @@ class OutputLoggerCallback(TrainerCallback):
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
-        # Debug: Print what we actually receive at step 1
-        if state.global_step == 1:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received args type: {type(args)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received state type: {type(state)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received control type: {type(control)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received inputs type: {type(inputs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received outputs type: {type(outputs)}", file=sys.stderr)
-            if inputs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
-            if outputs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: outputs keys: {list(outputs.keys()) if hasattr(outputs, 'keys') else 'no keys'}", file=sys.stderr)
-            sys.stderr.flush()
+        # Handle case where outputs is None
+        if outputs is None:
+            return
             
+        # Get model outputs and inputs
+        model_outputs = outputs
+        model_inputs = inputs if inputs is not None else {}
+        
         try:
-            # Get model outputs and labels
-            model_outputs = outputs if outputs is not None else {}
-            model_inputs = inputs if inputs is not None else {}
-            
-            # Debug: Check if we have outputs at step 1
-            if state.global_step == 1:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_outputs type: {type(model_outputs)}", file=sys.stderr)
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_inputs type: {type(model_inputs)}", file=sys.stderr)
-                if model_outputs:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_outputs keys: {list(model_outputs.keys()) if hasattr(model_outputs, 'keys') else 'no keys'}", file=sys.stderr)
-                if model_inputs:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_inputs keys: {list(model_inputs.keys()) if hasattr(model_inputs, 'keys') else 'no keys'}", file=sys.stderr)
-                sys.stderr.flush()
-            
             # Create prettified log
             log_lines = []
             log_lines.append(f"=== Model Output Analysis - Step {state.global_step} ===")
+            log_lines.append(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            log_lines.append("")
             
-            # Loss information
-            if hasattr(model_outputs, 'loss') and model_outputs.loss is not None:
-                if torch.is_tensor(model_outputs.loss):
-                    loss_value = model_outputs.loss.item() if model_outputs.loss.numel() == 1 else model_outputs.loss.mean().item()
-                else:
-                    loss_value = float(model_outputs.loss)
-                log_lines.append(f"├── Loss: {loss_value:.4f}")
-            
-            # Text token analysis
+            # Text Token Analysis
             log_lines.append("Text Token Analysis:")
             if hasattr(model_outputs, 'logits') and model_outputs.logits is not None:
                 logits = model_outputs.logits
                 log_lines.append(f"├── Logits Shape: {logits.shape}")
+                log_lines.append(f"├── Logits dtype: {logits.dtype}")
+                # Add statistics for logits
+                log_lines.append(f"│   ├── Min: {logits.min().item():.4f}, Max: {logits.max().item():.4f}, Mean: {logits.mean().item():.4f}")
                 
-                # Get predictions (argmax)
-                predictions = torch.argmax(logits, dim=-1)
-                
-                # Compare with labels if available
-                if hasattr(model_inputs, 'label_ids') and model_inputs.label_ids is not None:
-                    labels = model_inputs.label_ids
-                    log_lines.append(f"├── Labels Shape: {labels.shape}")
-                    
-                    # Compare first 10 tokens of first sample
-                    pred_sample = predictions[0][:10] if predictions.shape[1] >= 10 else predictions[0]
-                    label_sample = labels[0][:10] if labels.shape[1] >= 10 else labels[0]
-                    
-                    log_lines.append(f"├── Predicted (first 10): {pred_sample.tolist()}")
-                    log_lines.append(f"├── Target (first 10): {label_sample.tolist()}")
-                    
-                    # Calculate accuracy for non-masked tokens
-                    mask = (labels != -100) & (labels != 0)  # Exclude padding and masked tokens
-                    if mask.sum() > 0:
-                        correct = (predictions[mask] == labels[mask]).sum().item()
-                        total = mask.sum().item()
-                        accuracy = correct / total if total > 0 else 0
-                        log_lines.append(f"├── Text Match Accuracy: {accuracy:.2%} ({correct}/{total})")
-                    
-                    # Decode text if tokenizer is available
-                    if self.tokenizer:
-                        try:
-                            target_text = self.tokenizer.decode(label_sample, skip_special_tokens=False)
-                            predicted_text = self.tokenizer.decode(pred_sample, skip_special_tokens=False)
-                            log_lines.append(f"├── Target Text: {target_text}")
-                            log_lines.append(f"├── Predicted Text: {predicted_text}")
-                        except Exception as e:
-                            log_lines.append(f"├── Text Decoding Error: {str(e)}")
+                # Try to decode predictions if tokenizer is available
+                if self.tokenizer:
+                    try:
+                        # Get predicted tokens (argmax of logits)
+                        predicted_tokens = torch.argmax(logits, dim=-1)
+                        # Decode a sample (first sequence in batch)
+                        decoded_predictions = self.tokenizer.decode(predicted_tokens[0], skip_special_tokens=False)
+                        log_lines.append(f"├── Predicted Text (first sample): {decoded_predictions[:200]}{'...' if len(decoded_predictions) > 200 else ''}")
+                    except Exception as e:
+                        log_lines.append(f"├── Predicted Text: Error decoding - {str(e)}")
             else:
                 log_lines.append("├── Logits: NOT FOUND")
-                # Debug: Check what we actually have in model_outputs
-                if state.global_step == 1 and model_outputs:
-                    if hasattr(model_outputs, 'keys'):
-                        log_lines.append(f"├── Available keys in outputs: {list(model_outputs.keys())}")
-                    else:
-                        log_lines.append(f"├── Outputs type: {type(model_outputs)}")
             
-            # Audio token analysis
+            # Audio Token Analysis
             log_lines.append("Audio Token Analysis:")
+            audio_logits_found = False
             if hasattr(model_outputs, 'audio_logits') and model_outputs.audio_logits is not None:
                 audio_logits = model_outputs.audio_logits
                 log_lines.append(f"├── Audio Logits Shape: {audio_logits.shape}")
-                
-                # Get audio predictions
-                audio_predictions = torch.argmax(audio_logits, dim=-1)
-                
-                # Compare with audio labels if available
-                if hasattr(model_inputs, 'label_audio_ids') and model_inputs.label_audio_ids is not None:
-                    audio_labels = model_inputs.label_audio_ids
-                    log_lines.append(f"├── Audio Labels Shape: {audio_labels.shape}")
-                    
-                    # Compare first 10 tokens
-                    audio_pred_sample = audio_predictions[0][:10] if audio_predictions.shape[1] >= 10 else audio_predictions[0]
-                    audio_label_sample = audio_labels[0][:10] if audio_labels.shape[1] >= 10 else audio_labels[0]
-                    
-                    log_lines.append(f"├── Audio Predicted (first 10): {audio_pred_sample.tolist()}")
-                    log_lines.append(f"├── Audio Target (first 10): {audio_label_sample.tolist()}")
-                    
-                    # Calculate audio accuracy
-                    audio_correct = (audio_predictions[0][:len(audio_label_sample)] == audio_label_sample).sum().item()
-                    audio_total = len(audio_label_sample)
-                    audio_accuracy = audio_correct / audio_total if audio_total > 0 else 0
-                    log_lines.append(f"├── Audio Token Accuracy: {audio_accuracy:.2%} ({audio_correct}/{audio_total})")
-            else:
+                log_lines.append(f"├── Audio Logits dtype: {audio_logits.dtype}")
+                # Add statistics for audio logits
+                log_lines.append(f"│   ├── Min: {audio_logits.min().item():.4f}, Max: {audio_logits.max().item():.4f}, Mean: {audio_logits.mean().item():.4f}")
+                audio_logits_found = True
+            
+            # Check for other possible audio output names
+            for attr_name in ['decoder_audio_logits', 'audio_output_logits']:
+                if hasattr(model_outputs, attr_name) and getattr(model_outputs, attr_name) is not None:
+                    audio_logits = getattr(model_outputs, attr_name)
+                    log_lines.append(f"├── {attr_name} Shape: {audio_logits.shape}")
+                    log_lines.append(f"├── {attr_name} dtype: {audio_logits.dtype}")
+                    # Add statistics for audio logits
+                    log_lines.append(f"│   ├── Min: {audio_logits.min().item():.4f}, Max: {audio_logits.max().item():.4f}, Mean: {audio_logits.mean().item():.4f}")
+                    audio_logits_found = True
+            
+            if not audio_logits_found:
                 log_lines.append("├── Audio Logits: NOT FOUND")
+            
+            # Loss Information
+            log_lines.append("Loss Information:")
+            if hasattr(model_outputs, 'loss') and model_outputs.loss is not None:
+                loss = model_outputs.loss
+                if isinstance(loss, torch.Tensor):
+                    log_lines.append(f"├── Loss: {loss.item():.4f}")
+                else:
+                    log_lines.append(f"├── Loss: {loss}")
+            else:
+                # Try to get loss from logs if available
+                if hasattr(state, 'log_history') and state.log_history:
+                    latest_log = state.log_history[-1] if state.log_history else {}
+                    if 'loss' in latest_log:
+                        log_lines.append(f"├── Loss: {latest_log['loss']:.4f}")
+                    else:
+                        log_lines.append("├── Loss: NOT FOUND in outputs or logs")
+                else:
+                    log_lines.append("├── Loss: NOT FOUND in outputs or logs")
+            
+            # Ground Truth Comparison (if labels are available)
+            log_lines.append("Ground Truth Comparison:")
+            if hasattr(model_inputs, 'label_ids') and model_inputs.label_ids is not None:
+                label_ids = model_inputs.label_ids
+                log_lines.append(f"├── Label IDs Shape: {label_ids.shape}")
+                if self.tokenizer:
+                    try:
+                        # Decode a sample (first sequence in batch)
+                        decoded_labels = self.tokenizer.decode(label_ids[0], skip_special_tokens=False)
+                        log_lines.append(f"├── Ground Truth Text (first sample): {decoded_labels[:200]}{'...' if len(decoded_labels) > 200 else ''}")
+                    except Exception as e:
+                        log_lines.append(f"├── Ground Truth Text: Error decoding - {str(e)}")
+            else:
+                log_lines.append("├── Label IDs: NOT FOUND")
+            
+            # Audio Ground Truth (if available)
+            if hasattr(model_inputs, 'label_audio_ids') and model_inputs.label_audio_ids is not None:
+                label_audio_ids = model_inputs.label_audio_ids
+                log_lines.append(f"├── Label Audio IDs Shape: {label_audio_ids.shape}")
+            else:
+                log_lines.append("├── Label Audio IDs: NOT FOUND")
             
             # Print the log
             log_output = "\n".join(log_lines)
@@ -321,6 +291,8 @@ class SharedAttentionLoggerCallback(TrainerCallback):
             # Create prettified log
             log_lines = []
             log_lines.append(f"=== Shared Attention Verification - Step {state.global_step} ===")
+            log_lines.append(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            log_lines.append("")
             
             # Check for DualFFN layers (we can't access the model directly here)
             log_lines.append("├── Model structure analysis: LIMITED (model not directly accessible)")
@@ -363,77 +335,67 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
-        # Debug: Print what we actually receive at step 1
-        if state.global_step == 1:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received args type: {type(args)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received state type: {type(state)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received control type: {type(control)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received inputs type: {type(inputs)}", file=sys.stderr)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received outputs type: {type(outputs)}", file=sys.stderr)
-            if inputs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: inputs keys: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'no keys'}", file=sys.stderr)
-            if outputs:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: outputs keys: {list(outputs.keys()) if hasattr(outputs, 'keys') else 'no keys'}", file=sys.stderr)
-            sys.stderr.flush()
+        # Handle case where inputs is None
+        if inputs is None:
+            return
             
+        # Get model inputs
+        model_inputs = inputs
+        
         try:
-            # Get model inputs
-            model_inputs = inputs if inputs is not None else {}
-            
-            # Debug: Check what we have at step 1
-            if state.global_step == 1:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: model_inputs type: {type(model_inputs)}", file=sys.stderr)
-                if model_inputs:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: model_inputs keys: {list(model_inputs.keys()) if hasattr(model_inputs, 'keys') else 'no keys'}", file=sys.stderr)
-                sys.stderr.flush()
-            
             # Create prettified log
             log_lines = []
             log_lines.append(f"=== Zero-Shot Capability Metrics - Step {state.global_step} ===")
+            log_lines.append(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            log_lines.append("")
             
-            # Reference Audio Conditioning Effectiveness
+            # Reference Audio Conditioning
             log_lines.append("Reference Audio Conditioning:")
             if hasattr(model_inputs, 'audio_features') and model_inputs.audio_features is not None:
+                audio_features = model_inputs.audio_features
                 log_lines.append("├── Whisper Embedding Status: ✅ ENABLED")
-                log_lines.append(f"├── Reference Audio Features: {model_inputs.audio_features.shape}")
+                log_lines.append(f"├── Audio Features Shape: {audio_features.shape}")
+                # Add statistics for audio features
+                if _import_torch() and isinstance(audio_features, torch.Tensor):
+                    log_lines.append(f"│   ├── Min: {audio_features.min().item():.4f}, Max: {audio_features.max().item():.4f}, Mean: {audio_features.mean().item():.4f}")
             else:
                 log_lines.append("├── Whisper Embedding Status: ❌ DISABLED or NOT FOUND")
+                
                 # Check for fallback audio data
                 if hasattr(model_inputs, 'audio_waveforms_concat') and model_inputs.audio_waveforms_concat is not None:
-                    log_lines.append("├── Audio Waveforms (Fallback): ✅ PRESENT")
-                    log_lines.append(f"├── Audio Waveforms Shape: {model_inputs.audio_waveforms_concat.shape if hasattr(model_inputs.audio_waveforms_concat, 'shape') else 'present'}")
+                    audio_waveforms = model_inputs.audio_waveforms_concat
+                    log_lines.append(f"├── Audio Waveforms (Fallback): {audio_waveforms.shape if hasattr(audio_waveforms, 'shape') else 'present'}")
+                    if _import_torch() and isinstance(audio_waveforms, torch.Tensor):
+                        log_lines.append(f"│   ├── Min: {audio_waveforms.min().item():.4f}, Max: {audio_waveforms.max().item():.4f}, Mean: {audio_waveforms.mean().item():.4f}")
                 else:
                     log_lines.append("├── Audio Waveforms (Fallback): ❌ NOT FOUND")
             
-            # Audio token conditioning
             if hasattr(model_inputs, 'audio_in_ids') and model_inputs.audio_in_ids is not None:
-                log_lines.append("├── DAC Code Conditioning: ✅ PRESENT")
-                log_lines.append(f"├── Audio Input Tokens: {model_inputs.audio_in_ids.shape}")
+                log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {model_inputs.audio_in_ids.shape if hasattr(model_inputs.audio_in_ids, 'shape') else 'present'}")
             else:
                 log_lines.append("├── DAC Code Conditioning: ❌ NOT FOUND")
-                # Check for fallback audio data
-                if hasattr(model_inputs, 'audio_ids_concat') and model_inputs.audio_ids_concat is not None:
-                    log_lines.append("├── Audio IDs (Fallback): ✅ PRESENT")
-                    log_lines.append(f"├── Audio IDs Shape: {model_inputs.audio_ids_concat.shape}")
             
-            # ChatML structure verification
+            # ChatML Structure Verification
             log_lines.append("ChatML Structure Verification:")
             if hasattr(model_inputs, 'input_ids') and model_inputs.input_ids is not None:
                 input_ids = model_inputs.input_ids
-                # We can't access the model config here, so we'll use common values
-                audio_in_token_id = 128015  # Common value for Higgs Audio
-                audio_out_token_id = 128016  # Common value for Higgs Audio
-                
-                audio_in_count = (input_ids == audio_in_token_id).sum().item()
-                audio_out_count = (input_ids == audio_out_token_id).sum().item()
-                
-                log_lines.append(f"├── AUDIO_IN tokens found: {audio_in_count}")
-                log_lines.append(f"├── AUDIO_OUT tokens found: {audio_out_count}")
-                log_lines.append(f"├── Proper ChatML structure: {'✅ VERIFIED' if audio_in_count > 0 and audio_out_count > 0 else '❌ INCOMPLETE'}")
+                log_lines.append(f"├── Input IDs Shape: {input_ids.shape}")
+                # Check for special tokens that indicate proper ChatML structure
+                if _import_torch() and isinstance(input_ids, torch.Tensor):
+                    # Look for AUDIO_IN and AUDIO_OUT tokens if we know their IDs
+                    if hasattr(model_inputs, 'config') and hasattr(model_inputs.config, 'audio_in_token_idx'):
+                        audio_in_token_idx = model_inputs.config.audio_in_token_idx
+                        audio_in_count = (input_ids == audio_in_token_idx).sum().item()
+                        log_lines.append(f"├── AUDIO_IN Tokens Found: {audio_in_count}")
+                    
+                    if hasattr(model_inputs, 'config') and hasattr(model_inputs.config, 'audio_out_token_idx'):
+                        audio_out_token_idx = model_inputs.config.audio_out_token_idx
+                        audio_out_count = (input_ids == audio_out_token_idx).sum().item()
+                        log_lines.append(f"├── AUDIO_OUT Tokens Found: {audio_out_count}")
             else:
                 log_lines.append("├── Input IDs: ❌ NOT FOUND")
             
-            # Zero-Shot Capability Metrics (placeholder values)
+            # Zero-Shot Capability Metrics (placeholder - would need actual computation)
             log_lines.append("Zero-Shot Capability Metrics:")
             log_lines.append("├── Voice Cloning Consistency: CALCULATION NEEDED")
             log_lines.append("├── Cross-Lingual Adaptation: CALCULATION NEEDED")

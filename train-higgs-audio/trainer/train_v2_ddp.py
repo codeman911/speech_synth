@@ -685,13 +685,13 @@ class HiggsAudioTrainer(Trainer):
         Perform a training step and pass inputs/outputs to callbacks.
         This override allows strategic logging callbacks to access model data.
         """
-        # Call the parent training step to get loss and outputs
+        # Call the compute_loss to get loss and outputs
         loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
         
         # Call the callbacks with inputs and outputs
         # This is the key fix - we need to manually pass the data to callbacks
         if self.callback_handler:
-            # Create callback kwargs without model to avoid conflicts with default callbacks
+            # Create callback kwargs with inputs and outputs
             callback_kwargs = {
                 'inputs': inputs,
                 'outputs': outputs
@@ -847,6 +847,14 @@ def main():
                        help="Log strategic information every X steps (default: 100)")
     
     args = parser.parse_args()
+
+    # Test strategic logging callbacks availability
+    if args.enable_strategic_logging:
+        if not LOGGING_CALLBACKS_AVAILABLE:
+            logger.warning("Strategic logging callbacks not available, continuing without them")
+            args.enable_strategic_logging = False
+        else:
+            logger.info("Strategic logging callbacks are available and will be used")
 
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     device = f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu"
