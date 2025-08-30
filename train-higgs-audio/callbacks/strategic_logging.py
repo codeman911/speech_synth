@@ -74,11 +74,12 @@ class InputLoggerCallback(TrainerCallback):
                         if input_ids.numel() > 0:
                             max_token_id = input_ids.max().item()
                             vocab_size = len(self.tokenizer)
-                            if max_token_id < vocab_size:
+                            # Validate token IDs before decoding
+                            if max_token_id < vocab_size and max_token_id >= 0:
                                 decoded_text = self.tokenizer.decode(input_ids[0], skip_special_tokens=False)
                                 log_lines.append(f"├── Decoded Text (first sample): {decoded_text[:200]}{'...' if len(decoded_text) > 200 else ''}")
                             else:
-                                log_lines.append(f"├── Decoded Text: Error - token IDs exceed vocabulary size ({max_token_id} >= {vocab_size})")
+                                log_lines.append(f"├── Decoded Text: Error - token IDs out of range (max: {max_token_id}, vocab_size: {vocab_size})")
                         else:
                             log_lines.append("├── Decoded Text: Empty input_ids tensor")
                     except Exception as e:
@@ -211,11 +212,12 @@ class OutputLoggerCallback(TrainerCallback):
                                 # Check if predicted tokens are within valid range for the tokenizer
                                 max_token_id = predicted_tokens.max().item()
                                 vocab_size = len(self.tokenizer)
-                                if max_token_id < vocab_size:
+                                # Validate token IDs before decoding
+                                if max_token_id < vocab_size and max_token_id >= 0:
                                     decoded_predictions = self.tokenizer.decode(predicted_tokens[0], skip_special_tokens=False)
                                     log_lines.append(f"├── Predicted Text (first sample): {decoded_predictions[:200]}{'...' if len(decoded_predictions) > 200 else ''}")
                                 else:
-                                    log_lines.append(f"├── Predicted Text: Error - token IDs exceed vocabulary size ({max_token_id} >= {vocab_size})")
+                                    log_lines.append(f"├── Predicted Text: Error - token IDs out of range (max: {max_token_id}, vocab_size: {vocab_size})")
                             else:
                                 log_lines.append("├── Predicted Text: Empty predicted tokens tensor")
                         else:
@@ -291,12 +293,13 @@ class OutputLoggerCallback(TrainerCallback):
                             # Check if label_ids are within valid range for the tokenizer
                             max_token_id = label_ids.max().item()
                             vocab_size = len(self.tokenizer)
-                            if max_token_id < vocab_size:
+                            # Validate token IDs before decoding
+                            if max_token_id < vocab_size and max_token_id >= 0:
                                 # Decode a sample (first sequence in batch)
                                 decoded_labels = self.tokenizer.decode(label_ids[0], skip_special_tokens=False)
                                 log_lines.append(f"├── Ground Truth Text (first sample): {decoded_labels[:200]}{'...' if len(decoded_labels) > 200 else ''}")
                             else:
-                                log_lines.append(f"├── Ground Truth Text: Error - token IDs exceed vocabulary size ({max_token_id} >= {vocab_size})")
+                                log_lines.append(f"├── Ground Truth Text: Error - token IDs out of range (max: {max_token_id}, vocab_size: {vocab_size})")
                         else:
                             log_lines.append("├── Ground Truth Text: Empty label_ids tensor")
                     except Exception as e:
@@ -438,8 +441,17 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                 else:
                     log_lines.append("├── Audio Waveforms (Fallback): ❌ NOT FOUND")
             
-            if hasattr(model_inputs, 'audio_in_ids') and model_inputs.audio_in_ids is not None:
-                log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {model_inputs.audio_in_ids.shape if hasattr(model_inputs.audio_in_ids, 'shape') else 'present'}")
+            # DAC Code Conditioning
+            if hasattr(model_inputs, 'audio_ids_concat') and model_inputs.audio_ids_concat is not None:
+                audio_ids = model_inputs.audio_ids_concat
+                log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {audio_ids.shape if hasattr(audio_ids, 'shape') else 'present'}")
+                if _import_torch() and isinstance(audio_ids, torch.Tensor) and audio_ids.numel() > 0:
+                    log_lines.append(f"│   ├── Min: {audio_ids.min().item():.4f}, Max: {audio_ids.max().item():.4f}, Mean: {audio_ids.mean().item():.4f}")
+            elif hasattr(model_inputs, 'audio_in_ids') and model_inputs.audio_in_ids is not None:
+                audio_ids = model_inputs.audio_in_ids
+                log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {audio_ids.shape if hasattr(audio_ids, 'shape') else 'present'}")
+                if _import_torch() and isinstance(audio_ids, torch.Tensor) and audio_ids.numel() > 0:
+                    log_lines.append(f"│   ├── Min: {audio_ids.min().item():.4f}, Max: {audio_ids.max().item():.4f}, Mean: {audio_ids.mean().item():.4f}")
             else:
                 log_lines.append("├── DAC Code Conditioning: ❌ NOT FOUND")
             
@@ -451,19 +463,44 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                 # Check for special tokens that indicate proper ChatML structure
                 if _import_torch() and isinstance(input_ids, torch.Tensor):
                     # Look for AUDIO_IN and AUDIO_OUT tokens if we know their IDs
-                    if hasattr(model_inputs, 'config') and hasattr(model_inputs.config, 'audio_in_token_idx'):
-                        audio_in_token_idx = model_inputs.config.audio_in_token_idx
-                        audio_in_count = (input_ids == audio_in_token_idx).sum().item()
-                        log_lines.append(f"├── AUDIO_IN Tokens Found: {audio_in_count}")
-                    
-                    if hasattr(model_inputs, 'config') and hasattr(model_inputs.config, 'audio_out_token_idx'):
-                        audio_out_token_idx = model_inputs.config.audio_out_token_idx
-                        audio_out_count = (input_ids == audio_out_token_idx).sum().item()
-                        log_lines.append(f"├── AUDIO_OUT Tokens Found: {audio_out_count}")
+                    if hasattr(model_inputs, 'config'):
+                        if hasattr(model_inputs.config, 'audio_in_token_idx'):
+                            audio_in_token_idx = model_inputs.config.audio_in_token_idx
+                            audio_in_count = (input_ids == audio_in_token_idx).sum().item()
+                            log_lines.append(f"├── AUDIO_IN Tokens Found: {audio_in_count}")
+                        if hasattr(model_inputs.config, 'audio_out_token_idx'):
+                            audio_out_token_idx = model_inputs.config.audio_out_token_idx
+                            audio_out_count = (input_ids == audio_out_token_idx).sum().item()
+                            log_lines.append(f"├── AUDIO_OUT Tokens Found: {audio_out_count}")
+                    else:
+                        # Try to get token IDs from the inputs directly
+                        if hasattr(model_inputs, 'audio_in_token_id') and model_inputs.audio_in_token_id is not None:
+                            audio_in_token_idx = model_inputs.audio_in_token_id
+                            audio_in_count = (input_ids == audio_in_token_idx).sum().item()
+                            log_lines.append(f"├── AUDIO_IN Tokens Found: {audio_in_count}")
+                        if hasattr(model_inputs, 'audio_out_token_id') and model_inputs.audio_out_token_id is not None:
+                            audio_out_token_idx = model_inputs.audio_out_token_id
+                            audio_out_count = (input_ids == audio_out_token_idx).sum().item()
+                            log_lines.append(f"├── AUDIO_OUT Tokens Found: {audio_out_count}")
             else:
                 log_lines.append("├── Input IDs: ❌ NOT FOUND")
             
+            # Training Progress Indicators
+            log_lines.append("Training Progress Indicators:")
+            if hasattr(state, 'log_history') and state.log_history:
+                latest_log = state.log_history[-1] if state.log_history else {}
+                if 'grad_norm' in latest_log:
+                    grad_norm = latest_log['grad_norm']
+                    log_lines.append(f"├── Gradient Norm: {grad_norm:.6f} ({'HEALTHY' if grad_norm > 0 else 'STALLED'})")
+                if 'learning_rate' in latest_log:
+                    lr = latest_log['learning_rate']
+                    log_lines.append(f"├── Learning Rate: {lr:.2e} ({'APPROPRIATE' if lr > 1e-6 else 'TOO LOW'})")
+                if 'loss' in latest_log:
+                    loss = latest_log['loss']
+                    log_lines.append(f"└── Loss: {loss:.4f}")
+            
             # Zero-Shot Capability Metrics (placeholder - would need actual computation)
+            log_lines.append("")
             log_lines.append("Zero-Shot Capability Metrics:")
             log_lines.append("├── Voice Cloning Consistency: CALCULATION NEEDED")
             log_lines.append("├── Cross-Lingual Adaptation: CALCULATION NEEDED")
