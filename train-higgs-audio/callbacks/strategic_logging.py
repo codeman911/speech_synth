@@ -49,12 +49,26 @@ class InputLoggerCallback(TrainerCallback):
                 sys.stderr.flush()
             return
             
+        # Debug: Print what we actually receive
+        if state.global_step == 1:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received args type: {type(args)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received state type: {type(state)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received control type: {type(control)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received logs type: {type(logs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Received kwargs keys: {list(kwargs.keys())}", file=sys.stderr)
+            if logs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Logs content: {list(logs.keys())}", file=sys.stderr)
+            sys.stderr.flush()
+            
         # Get model inputs from kwargs
         model_inputs = kwargs.get('inputs', {})
         if not model_inputs:
             # Log that we didn't get inputs for debugging
             if state.global_step == 1:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: No inputs received at step {state.global_step}", file=sys.stderr)
+                # Check if inputs might be in logs or elsewhere
+                if logs:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: Available in logs: {list(logs.keys())}", file=sys.stderr)
                 sys.stderr.flush()
             return
             
@@ -159,10 +173,31 @@ class OutputLoggerCallback(TrainerCallback):
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
+        # Debug: Print what we actually receive at step 1
+        if state.global_step == 1:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received args type: {type(args)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received state type: {type(state)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received control type: {type(control)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received logs type: {type(logs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Received kwargs keys: {list(kwargs.keys())}", file=sys.stderr)
+            if logs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: Logs content: {list(logs.keys())}", file=sys.stderr)
+            sys.stderr.flush()
+            
         try:
             # Get model outputs and labels
             model_outputs = kwargs.get('outputs', {})
             model_inputs = kwargs.get('inputs', {})
+            
+            # Debug: Check if we have outputs at step 1
+            if state.global_step == 1:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_outputs type: {type(model_outputs)}", file=sys.stderr)
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_inputs type: {type(model_inputs)}", file=sys.stderr)
+                if model_outputs:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_outputs keys: {list(model_outputs.keys()) if hasattr(model_outputs, 'keys') else 'no keys'}", file=sys.stderr)
+                if model_inputs:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG OUTPUT: model_inputs keys: {list(model_inputs.keys()) if hasattr(model_inputs, 'keys') else 'no keys'}", file=sys.stderr)
+                sys.stderr.flush()
             
             # Create prettified log
             log_lines = []
@@ -214,6 +249,12 @@ class OutputLoggerCallback(TrainerCallback):
                             log_lines.append(f"├── Text Decoding Error: {str(e)}")
             else:
                 log_lines.append("├── Logits: NOT FOUND")
+                # Debug: Check what we actually have in model_outputs
+                if state.global_step == 1 and model_outputs:
+                    if hasattr(model_outputs, 'keys'):
+                        log_lines.append(f"├── Available keys in outputs: {list(model_outputs.keys())}")
+                    else:
+                        log_lines.append(f"├── Outputs type: {type(model_outputs)}")
             
             # Audio token analysis
             log_lines.append("Audio Token Analysis:")
@@ -340,9 +381,27 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
+        # Debug: Print what we actually receive at step 1
+        if state.global_step == 1:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received args type: {type(args)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received state type: {type(state)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received control type: {type(control)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received logs type: {type(logs)}", file=sys.stderr)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Received kwargs keys: {list(kwargs.keys())}", file=sys.stderr)
+            if logs:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: Logs content: {list(logs.keys())}", file=sys.stderr)
+            sys.stderr.flush()
+            
         try:
             # Get model inputs
             model_inputs = kwargs.get('inputs', {})
+            
+            # Debug: Check what we have at step 1
+            if state.global_step == 1:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: model_inputs type: {type(model_inputs)}", file=sys.stderr)
+                if model_inputs:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG ZERO-SHOT: model_inputs keys: {list(model_inputs.keys()) if hasattr(model_inputs, 'keys') else 'no keys'}", file=sys.stderr)
+                sys.stderr.flush()
             
             # Create prettified log
             log_lines = []
