@@ -21,13 +21,17 @@ class InputLoggerCallback(TrainerCallback):
         
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Log input sequence analysis and tensor details"""
-        # Check if it's time to log
-        if state.global_step % self.log_every_n_steps != 0:
+        # Check if it's time to log (every N steps OR at step 1 for debugging)
+        if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
         # Get model inputs from kwargs
         model_inputs = kwargs.get('inputs', {})
         if not model_inputs:
+            # Log that we didn't get inputs for debugging
+            if state.global_step == 1:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: No inputs received at step {state.global_step}", file=sys.stderr)
+                sys.stderr.flush()
             return
             
         try:
@@ -50,6 +54,8 @@ class InputLoggerCallback(TrainerCallback):
                     except Exception as e:
                         log_lines.append(f"├── Decoded Text: Error decoding - {str(e)}")
                 log_lines.append(f"├── Sample input_ids (first 20): {input_ids[0][:20].tolist()}")
+            else:
+                log_lines.append("├── input_ids: NOT FOUND")
             
             # Audio context information
             audio_tokens_info = []
@@ -60,13 +66,17 @@ class InputLoggerCallback(TrainerCallback):
             
             if audio_tokens_info:
                 log_lines.append(f"├── Audio Tokens: {', '.join(audio_tokens_info)}")
+            else:
+                log_lines.append("├── Audio Tokens: NONE FOUND")
             
             # Tensor Details
             log_lines.append("Input Tensor Details:")
+            tensor_found = False
             for attr_name in dir(model_inputs):
                 if not attr_name.startswith('_') and not callable(getattr(model_inputs, attr_name)):
                     attr_value = getattr(model_inputs, attr_name)
                     if isinstance(attr_value, torch.Tensor):
+                        tensor_found = True
                         log_lines.append(f"├── {attr_name}: {attr_value.shape} - dtype: {attr_value.dtype}")
                         # Add statistics for floating point tensors
                         if attr_value.is_floating_point():
@@ -76,13 +86,16 @@ class InputLoggerCallback(TrainerCallback):
                             sample_values = attr_value.flatten()[:10].tolist()
                             log_lines.append(f"│   └── Sample values: {sample_values}")
             
+            if not tensor_found:
+                log_lines.append("├── No tensors found in model inputs")
+            
             # Reference Audio Conditioning
             log_lines.append("Reference Audio Conditioning:")
             if hasattr(model_inputs, 'audio_features') and model_inputs.audio_features is not None:
-                log_lines.append(f"├── Whisper Embedding Status: ENABLED")
+                log_lines.append("├── Whisper Embedding Status: ✅ ENABLED")
                 log_lines.append(f"├── Audio Features Shape: {model_inputs.audio_features.shape}")
             else:
-                log_lines.append("├── Whisper Embedding Status: DISABLED or NOT FOUND")
+                log_lines.append("├── Whisper Embedding Status: ❌ DISABLED or NOT FOUND")
             
             if hasattr(model_inputs, 'audio_waveforms_concat') and model_inputs.audio_waveforms_concat is not None:
                 log_lines.append(f"├── Audio Waveforms Shape: {model_inputs.audio_waveforms_concat.shape}")
@@ -96,6 +109,9 @@ class InputLoggerCallback(TrainerCallback):
             
         except Exception as e:
             logger.warning(f"Error in InputLoggerCallback: {str(e)}")
+            # Also print error to stderr for visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG ERROR: {str(e)}", file=sys.stderr)
+            sys.stderr.flush()
 
 
 class OutputLoggerCallback(TrainerCallback):
@@ -110,8 +126,8 @@ class OutputLoggerCallback(TrainerCallback):
         
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Log model outputs and comparisons"""
-        # Check if it's time to log
-        if state.global_step % self.log_every_n_steps != 0:
+        # Check if it's time to log (every N steps OR at step 1 for debugging)
+        if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
         try:
@@ -167,6 +183,8 @@ class OutputLoggerCallback(TrainerCallback):
                             log_lines.append(f"├── Predicted Text: {predicted_text}")
                         except Exception as e:
                             log_lines.append(f"├── Text Decoding Error: {str(e)}")
+            else:
+                log_lines.append("├── Logits: NOT FOUND")
             
             # Audio token analysis
             log_lines.append("Audio Token Analysis:")
@@ -194,6 +212,8 @@ class OutputLoggerCallback(TrainerCallback):
                     audio_total = len(audio_label_sample)
                     audio_accuracy = audio_correct / audio_total if audio_total > 0 else 0
                     log_lines.append(f"├── Audio Token Accuracy: {audio_accuracy:.2%} ({audio_correct}/{audio_total})")
+            else:
+                log_lines.append("├── Audio Logits: NOT FOUND")
             
             # Print the log
             log_output = "\n".join(log_lines)
@@ -204,6 +224,9 @@ class OutputLoggerCallback(TrainerCallback):
             
         except Exception as e:
             logger.warning(f"Error in OutputLoggerCallback: {str(e)}")
+            # Also print error to stderr for visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG ERROR: {str(e)}", file=sys.stderr)
+            sys.stderr.flush()
 
 
 class SharedAttentionLoggerCallback(TrainerCallback):
@@ -217,14 +240,18 @@ class SharedAttentionLoggerCallback(TrainerCallback):
         
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Log shared attention verification"""
-        # Check if it's time to log
-        if state.global_step % self.log_every_n_steps != 0:
+        # Check if it's time to log (every N steps OR at step 1 for debugging)
+        if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
         try:
             # Get model from kwargs
             model = kwargs.get('model')
             if not model or not hasattr(model, 'model'):
+                # Log that we didn't get model for debugging
+                if state.global_step == 1:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: No model received at step {state.global_step}", file=sys.stderr)
+                    sys.stderr.flush()
                 return
                 
             # Create prettified log
@@ -264,6 +291,9 @@ class SharedAttentionLoggerCallback(TrainerCallback):
             
         except Exception as e:
             logger.warning(f"Error in SharedAttentionLoggerCallback: {str(e)}")
+            # Also print error to stderr for visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG ERROR: {str(e)}", file=sys.stderr)
+            sys.stderr.flush()
 
 
 class ZeroShotVerificationLoggerCallback(TrainerCallback):
@@ -277,8 +307,8 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
         
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Log zero-shot voice cloning verification"""
-        # Check if it's time to log
-        if state.global_step % self.log_every_n_steps != 0:
+        # Check if it's time to log (every N steps OR at step 1 for debugging)
+        if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
             return
             
         try:
@@ -302,6 +332,8 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
             if model and hasattr(model, 'model') and hasattr(model.model, 'config'):
                 encode_whisper = getattr(model.model.config, 'encode_whisper_embed', False)
                 log_lines.append(f"├── Config encode_whisper_embed: {'✅ ENABLED' if encode_whisper else '❌ DISABLED'}")
+            else:
+                log_lines.append("├── Config encode_whisper_embed: ❌ NOT ACCESSIBLE")
             
             # Audio token conditioning
             if hasattr(model_inputs, 'audio_in_ids') and model_inputs.audio_in_ids is not None:
@@ -324,6 +356,8 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                 log_lines.append(f"├── AUDIO_IN tokens found: {audio_in_count}")
                 log_lines.append(f"├── AUDIO_OUT tokens found: {audio_out_count}")
                 log_lines.append(f"├── Proper ChatML structure: {'✅ VERIFIED' if audio_in_count > 0 and audio_out_count > 0 else '❌ INCOMPLETE'}")
+            else:
+                log_lines.append("├── Input IDs: ❌ NOT FOUND")
             
             # Zero-Shot Capability Metrics (placeholder values)
             log_lines.append("Zero-Shot Capability Metrics:")
@@ -341,3 +375,6 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
             
         except Exception as e:
             logger.warning(f"Error in ZeroShotVerificationLoggerCallback: {str(e)}")
+            # Also print error to stderr for visibility
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG ERROR: {str(e)}", file=sys.stderr)
+            sys.stderr.flush()
