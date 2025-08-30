@@ -75,9 +75,12 @@ class InputLoggerCallback(TrainerCallback):
                             max_token_id = input_ids.max().item()
                             min_token_id = input_ids.min().item()
                             vocab_size = len(self.tokenizer)
-                            # Validate token IDs before decoding
-                            if max_token_id < vocab_size and min_token_id >= 0:
-                                decoded_text = self.tokenizer.decode(input_ids[0], skip_special_tokens=False)
+                            # Validate token IDs before decoding, handling special tokens like -100
+                            if max_token_id < vocab_size and min_token_id >= -100:  # Allow -100 for padding
+                                # Filter out special tokens (-100) before decoding
+                                filtered_input_ids = input_ids[0].clone()
+                                filtered_input_ids[filtered_input_ids == -100] = self.tokenizer.pad_token_id or 0
+                                decoded_text = self.tokenizer.decode(filtered_input_ids, skip_special_tokens=False)
                                 log_lines.append(f"├── Decoded Text (first sample): {decoded_text[:200]}{'...' if len(decoded_text) > 200 else ''}")
                             else:
                                 log_lines.append(f"├── Decoded Text: Error - token IDs out of range (min: {min_token_id}, max: {max_token_id}, vocab_size: {vocab_size})")
@@ -225,7 +228,7 @@ class OutputLoggerCallback(TrainerCallback):
                                 max_token_id = predicted_tokens.max().item()
                                 min_token_id = predicted_tokens.min().item()
                                 vocab_size = len(self.tokenizer)
-                                # Validate token IDs before decoding
+                                # Validate token IDs before decoding, handling special tokens
                                 if max_token_id < vocab_size and min_token_id >= 0:
                                     decoded_predictions = self.tokenizer.decode(predicted_tokens[0], skip_special_tokens=False)
                                     log_lines.append(f"├── Predicted Text (first sample): {decoded_predictions[:200]}{'...' if len(decoded_predictions) > 200 else ''}")
@@ -307,10 +310,13 @@ class OutputLoggerCallback(TrainerCallback):
                             max_token_id = label_ids.max().item()
                             min_token_id = label_ids.min().item()
                             vocab_size = len(self.tokenizer)
-                            # Validate token IDs before decoding
-                            if max_token_id < vocab_size and min_token_id >= 0:
+                            # Validate token IDs before decoding, handling special tokens like -100
+                            if max_token_id < vocab_size and min_token_id >= -100:  # Allow -100 for padding
+                                # Filter out special tokens (-100) before decoding
+                                filtered_label_ids = label_ids[0].clone()
+                                filtered_label_ids[filtered_label_ids == -100] = self.tokenizer.pad_token_id or 0
                                 # Decode a sample (first sequence in batch)
-                                decoded_labels = self.tokenizer.decode(label_ids[0], skip_special_tokens=False)
+                                decoded_labels = self.tokenizer.decode(filtered_label_ids, skip_special_tokens=False)
                                 log_lines.append(f"├── Ground Truth Text (first sample): {decoded_labels[:200]}{'...' if len(decoded_labels) > 200 else ''}")
                             else:
                                 log_lines.append(f"├── Ground Truth Text: Error - token IDs out of range (min: {min_token_id}, max: {max_token_id}, vocab_size: {vocab_size})")
@@ -456,17 +462,29 @@ class ZeroShotVerificationLoggerCallback(TrainerCallback):
                     log_lines.append("├── Audio Waveforms (Fallback): ❌ NOT FOUND")
             
             # DAC Code Conditioning
+            dac_found = False
             if hasattr(model_inputs, 'audio_ids_concat') and model_inputs.audio_ids_concat is not None:
                 audio_ids = model_inputs.audio_ids_concat
-                log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {audio_ids.shape if hasattr(audio_ids, 'shape') else 'present'}")
-                if _import_torch() and isinstance(audio_ids, torch.Tensor) and audio_ids.numel() > 0:
-                    log_lines.append(f"│   ├── Min: {audio_ids.min().item():.4f}, Max: {audio_ids.max().item():.4f}, Mean: {audio_ids.mean().item():.4f}")
+                if _import_torch() and isinstance(audio_ids, torch.Tensor):
+                    if audio_ids.numel() > 0:
+                        log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {audio_ids.shape}")
+                        log_lines.append(f"│   ├── Min: {audio_ids.min().item():.4f}, Max: {audio_ids.max().item():.4f}, Mean: {audio_ids.mean().item():.4f}")
+                        dac_found = True
+                    else:
+                        log_lines.append(f"├── DAC Code Conditioning: ⚠️ FOUND but EMPTY - Shape: {audio_ids.shape}")
+                        dac_found = True
             elif hasattr(model_inputs, 'audio_in_ids') and model_inputs.audio_in_ids is not None:
                 audio_ids = model_inputs.audio_in_ids
-                log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {audio_ids.shape if hasattr(audio_ids, 'shape') else 'present'}")
-                if _import_torch() and isinstance(audio_ids, torch.Tensor) and audio_ids.numel() > 0:
-                    log_lines.append(f"│   ├── Min: {audio_ids.min().item():.4f}, Max: {audio_ids.max().item():.4f}, Mean: {audio_ids.mean().item():.4f}")
-            else:
+                if _import_torch() and isinstance(audio_ids, torch.Tensor):
+                    if audio_ids.numel() > 0:
+                        log_lines.append(f"├── DAC Code Conditioning: ✅ FOUND - Shape: {audio_ids.shape}")
+                        log_lines.append(f"│   ├── Min: {audio_ids.min().item():.4f}, Max: {audio_ids.max().item():.4f}, Mean: {audio_ids.mean().item():.4f}")
+                        dac_found = True
+                    else:
+                        log_lines.append(f"├── DAC Code Conditioning: ⚠️ FOUND but EMPTY - Shape: {audio_ids.shape}")
+                        dac_found = True
+            
+            if not dac_found:
                 log_lines.append("├── DAC Code Conditioning: ❌ NOT FOUND")
             
             # ChatML Structure Verification
