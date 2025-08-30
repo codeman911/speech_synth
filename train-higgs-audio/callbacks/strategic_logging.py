@@ -1,13 +1,30 @@
+"""
+Strategic Logging Callbacks for Zero-Shot Voice Cloning Training
+Provides transparency into the Higgs Audio training process without disrupting workflow.
+"""
+
 import logging
-import torch
+import sys
+from datetime import datetime
 from transformers import TrainerCallback
 from typing import Dict, Any, Optional
 import json
-import sys
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Global variable to hold torch reference
+torch = None
+
+def _import_torch():
+    """Import torch only when needed"""
+    global torch
+    if torch is None:
+        try:
+            import torch as _torch
+            torch = _torch
+        except ImportError:
+            torch = None
+    return torch is not None
 
 class InputLoggerCallback(TrainerCallback):
     """
@@ -23,6 +40,13 @@ class InputLoggerCallback(TrainerCallback):
         """Log input sequence analysis and tensor details"""
         # Check if it's time to log (every N steps OR at step 1 for debugging)
         if state.global_step % self.log_every_n_steps != 0 and state.global_step != 1:
+            return
+            
+        # Import torch when needed
+        if not _import_torch():
+            if state.global_step == 1:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] STRATEGIC LOG DEBUG: torch not available", file=sys.stderr)
+                sys.stderr.flush()
             return
             
         # Get model inputs from kwargs

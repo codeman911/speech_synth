@@ -58,11 +58,20 @@ except ImportError:
 
 # Import strategic logging callbacks
 try:
+    import sys
+    import os
+    # Add the project root directory to sys.path so we can import callbacks
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    
     from callbacks.strategic_logging import InputLoggerCallback, OutputLoggerCallback, SharedAttentionLoggerCallback, ZeroShotVerificationLoggerCallback
     LOGGING_CALLBACKS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     LOGGING_CALLBACKS_AVAILABLE = False
-    logging.warning("Strategic logging callbacks not available.")
+    logging.warning(f"Strategic logging callbacks not available: {e}")
+    import traceback
+    logging.warning(f"Import error traceback: {traceback.format_exc()}")
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -129,6 +138,10 @@ class ExtendedHiggsAudioSampleCollator:
             self.pad_token_id = kwargs.get('pad_token_id', 0)
 
     def __call__(self, batch: List[ChatMLDatasetSample]):
+        # Import torch when needed
+        if not _import_torch():
+            raise ImportError("torch is required but not available")
+            
         if HIGGS_AVAILABLE and hasattr(self, 'base_collator'):
             batch_input = self.base_collator(batch)
             label_audio_ids = batch_input.audio_out_ids
@@ -246,6 +259,10 @@ class ZeroShotVoiceCloningDataset(Dataset):
 
     def _load_audio_waveform(self, audio_path: str) -> Tuple[torch.Tensor, int]:
         """Load and process audio waveform"""
+        # Import torch when needed
+        if not _import_torch():
+            raise ImportError("torch is required but not available")
+            
         try:
             waveform, sr = torchaudio.load(audio_path)
             if waveform.shape[0] > 1:
@@ -259,6 +276,10 @@ class ZeroShotVoiceCloningDataset(Dataset):
 
     def _encode_audio_tokens(self, audio_path: str) -> Optional[torch.Tensor]:
         """Encode audio to tokens using audio tokenizer"""
+        # Import torch when needed
+        if not _import_torch():
+            raise ImportError("torch is required but not available")
+            
         if not self.audio_tokenizer: 
             return None
         try:
