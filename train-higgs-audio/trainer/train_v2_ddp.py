@@ -56,8 +56,16 @@ except ImportError:
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
+# Import strategic logging callbacks
+try:
+    from .strategic_logging_callbacks import InputLoggerCallback, OutputLoggerCallback, SharedAttentionLoggerCallback, ZeroShotVerificationLoggerCallback
+    LOGGING_CALLBACKS_AVAILABLE = True
+except ImportError:
+    LOGGING_CALLBACKS_AVAILABLE = False
+    logging.warning("Strategic logging callbacks not available.")
+
 # Setup logging
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Add constants
@@ -744,6 +752,12 @@ def main():
     parser.add_argument("--freeze_llm", action="store_true", default=False,
                        help="Freeze LLM components")
     
+    # Strategic logging arguments
+    parser.add_argument("--enable_strategic_logging", action="store_true", default=False,
+                       help="Enable strategic logging for zero-shot voice cloning training")
+    parser.add_argument("--strategic_logging_steps", type=int, default=100,
+                       help="Log strategic information every X steps (default: 100)")
+    
     args = parser.parse_args()
 
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -887,6 +901,14 @@ def main():
     # Add LoRA checkpoint callback if using LoRA
     if args.use_lora:
         trainer.add_callback(LoRACheckpointCallback())
+    
+    # Add strategic logging callbacks if enabled
+    if args.enable_strategic_logging and LOGGING_CALLBACKS_AVAILABLE:
+        trainer.add_callback(InputLoggerCallback(tokenizer=tokenizer, log_every_n_steps=args.strategic_logging_steps))
+        trainer.add_callback(OutputLoggerCallback(tokenizer=tokenizer, log_every_n_steps=args.strategic_logging_steps))
+        trainer.add_callback(SharedAttentionLoggerCallback(log_every_n_steps=args.strategic_logging_steps))
+        trainer.add_callback(ZeroShotVerificationLoggerCallback(log_every_n_steps=args.strategic_logging_steps))
+        logger.info(f"Strategic logging enabled every {args.strategic_logging_steps} steps")
 
     logger.info(f"Starting zero-shot voice cloning training on device: {device}")
     trainer.train()
