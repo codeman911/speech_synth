@@ -680,7 +680,7 @@ class HiggsAudioTrainer(Trainer):
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
         return (loss, outputs) if return_outputs else loss
         
-    def training_step(self, model, inputs):
+    def training_step(self, model, inputs, num_items_in_batch=None):
         """
         Perform a training step and pass inputs/outputs to callbacks.
         This override allows strategic logging callbacks to access model data.
