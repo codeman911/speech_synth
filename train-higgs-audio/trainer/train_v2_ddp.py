@@ -144,6 +144,8 @@ class ExtendedHiggsAudioSampleCollator:
             self.encode_whisper_embed = kwargs.get('encode_whisper_embed', False)
             self.audio_in_token_id = kwargs.get('audio_in_token_id', None)
             self.audio_out_token_id = kwargs.get('audio_out_token_id', None)
+            # Add audio_num_codebooks for proper DAC token handling
+            self.audio_num_codebooks = kwargs.get('audio_num_codebooks', 8)
 
     def __call__(self, batch: List[ChatMLDatasetSample]):
         if HIGGS_AVAILABLE and hasattr(self, 'base_collator'):
@@ -201,7 +203,8 @@ class ExtendedHiggsAudioSampleCollator:
                 if hasattr(sample, 'audio_ids_concat') and sample.audio_ids_concat is not None:
                     audio_ids_concat_list.append(sample.audio_ids_concat)
                 else:
-                    audio_ids_concat_list.append(torch.zeros((8, 0), dtype=torch.long))
+                    # Use the correct number of codebooks
+                    audio_ids_concat_list.append(torch.zeros((self.audio_num_codebooks, 0), dtype=torch.long))
                     
                 if hasattr(sample, 'audio_ids_start') and sample.audio_ids_start is not None:
                     audio_ids_start_list.append(sample.audio_ids_start)
@@ -285,6 +288,16 @@ class ExtendedHiggsAudioSampleCollator:
                         audio_feature_attention_mask = torch.stack(attention_masks)
                 except Exception as e:
                     logger.warning(f"Failed to process audio features with Whisper: {e}")
+            else:
+                # Even if we don't process with Whisper, we should still create empty tensors
+                # to maintain consistent structure
+                if any(wav.numel() > 0 for wav in audio_waveforms_concat_list):
+                    # We have waveforms but no processor, create dummy tensors
+                    batch_size = len([wav for wav in audio_waveforms_concat_list if wav.numel() > 0])
+                    if batch_size > 0:
+                        # Create dummy audio features with the right shape
+                        audio_features = torch.zeros((batch_size, 128, 3000))  # Match the shape from logs
+                        audio_feature_attention_mask = torch.ones((batch_size, 3000), dtype=torch.long)
 
             return ExtendedHiggsAudioBatchInput(
                 input_ids=torch.stack(padded_input_ids),
@@ -305,7 +318,7 @@ class ExtendedHiggsAudioSampleCollator:
                 audio_sample_rate=padded_audio_sample_rate[0] if padded_audio_sample_rate else torch.tensor([], dtype=torch.float32),
                 audio_speaker_indices=padded_audio_speaker_indices[0] if padded_audio_speaker_indices else torch.tensor([], dtype=torch.long),
                 # Include audio tokens
-                audio_ids_concat=padded_audio_ids_concat[0] if padded_audio_ids_concat else torch.zeros((8, 0), dtype=torch.long),
+                audio_ids_concat=padded_audio_ids_concat[0] if padded_audio_ids_concat else torch.zeros((self.audio_num_codebooks, 0), dtype=torch.long),
                 audio_ids_start=padded_audio_ids_start[0] if padded_audio_ids_start else torch.tensor([0], dtype=torch.long),
             )
 
@@ -358,6 +371,8 @@ class ZeroShotVoiceCloningDataset(Dataset):
         self.tokenizer = tokenizer
         self.audio_tokenizer = audio_tokenizer
         self.sample_rate = sample_rate
+        # Add audio_num_codebooks for proper DAC token handling
+        self.audio_num_codebooks = getattr(audio_tokenizer, 'n_codebooks', 8)
         
         # Load samples from ChatML file
         self.samples = self._load_samples_from_chatml()
@@ -566,17 +581,17 @@ class ZeroShotVoiceCloningDataset(Dataset):
                     if tokens is not None: 
                         label_audio_tokens.append(tokens)
 
-            # Concatenate context audio tokens
+            # Concatenate context audio tokens following the inference pattern
             if context_audio_tokens:
-                audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
                 audio_ids_start = torch.tensor(
                     np.cumsum(np.array([0] + [t.shape[1] for t in context_audio_tokens])),
                     dtype=torch.long
-                )
+                )[:-1]  # Remove the last element to match the inference pattern
+                audio_ids_concat = torch.cat(context_audio_tokens, dim=1)
             else:
-                # Default to 8 codebooks with empty tensor
-                audio_ids_concat = torch.zeros((getattr(self.audio_tokenizer, 'n_codebooks', 8), 0), dtype=torch.long)
-                audio_ids_start = torch.tensor([0], dtype=torch.long)
+                # Default to the correct number of codebooks with empty tensor
+                audio_ids_concat = torch.zeros((getattr(self.audio_tokenizer, 'n_codebooks', self.audio_num_codebooks), 0), dtype=torch.long)
+                audio_ids_start = torch.tensor([], dtype=torch.long)
 
             # Concatenate label audio tokens
             if label_audio_tokens:
@@ -601,12 +616,14 @@ class ZeroShotVoiceCloningDataset(Dataset):
                     logger.warning(f"Could not load reference waveform: {e}")
             
             # Create dataset sample following the exact same pattern as inference
+            # This follows the _create_robust_sample pattern from arb_inference.py
             dataset_sample = ChatMLDatasetSample(
                 input_ids=torch.tensor(input_tokens, dtype=torch.long),
                 label_ids=torch.tensor(label_tokens, dtype=torch.long),
                 audio_ids_concat=audio_ids_concat,
                 audio_ids_start=audio_ids_start,
                 label_audio_ids=label_audio_ids,
+                # Include audio waveforms for Whisper conditioning
                 audio_waveforms_concat=ref_waveform if ref_waveform is not None and ref_waveform.numel() > 0 else torch.tensor([]),
                 audio_waveforms_start=torch.tensor([0], dtype=torch.long) if ref_waveform is not None and ref_waveform.numel() > 0 else torch.tensor([], dtype=torch.long),
                 audio_sample_rate=torch.tensor([ref_sample_rate], dtype=torch.float32) if ref_sample_rate is not None else torch.tensor([], dtype=torch.float32),
@@ -1071,11 +1088,13 @@ def main():
             data_collator = ExtendedHiggsAudioSampleCollator(
                 pad_token_id=tokenizer.pad_token_id,
                 encode_whisper_embed=True,  # Still enable for fallback
+                audio_num_codebooks=getattr(model.config, 'audio_num_codebooks', 8),
             )
     else:
         data_collator = ExtendedHiggsAudioSampleCollator(
             pad_token_id=tokenizer.pad_token_id,
             encode_whisper_embed=True,  # Enable Whisper embedding for fallback
+            audio_num_codebooks=getattr(model.config, 'audio_num_codebooks', 8),
         )
         logger.warning("Using fallback collator with Whisper processing")
     
